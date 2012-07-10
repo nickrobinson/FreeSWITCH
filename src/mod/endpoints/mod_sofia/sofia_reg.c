@@ -553,20 +553,22 @@ int sofia_reg_nat_callback(void *pArg, int argc, char **argv, char **columnNames
 	nua_handle_t *nh;
 	char to[128] = "";
 	sofia_destination_t *dst = NULL;
+    char *route_uri = NULL;
 
 	switch_snprintf(to, sizeof(to), "sip:%s@%s", argv[1], argv[2]);
 	dst = sofia_glue_get_destination(argv[3]);
 	switch_assert(dst);
 	
-	nh = nua_handle(profile->nua, NULL, SIPTAG_FROM_STR(profile->url), SIPTAG_TO_STR(to), NUTAG_URL(dst->contact), SIPTAG_CONTACT_STR(profile->url),
-					TAG_END());
+	if (dst->route_uri) {
+		route_uri = sofia_glue_strip_uri(dst->route_uri);
+	}
+
+	nh = nua_handle(profile->nua, NULL, SIPTAG_FROM_STR(profile->url), SIPTAG_TO_STR(to), NUTAG_URL(dst->contact), SIPTAG_CONTACT_STR(profile->url), TAG_END());
 	nua_handle_bind(nh, &mod_sofia_globals.destroy_private);
-	nua_options(nh, 
-				NTATAG_SIP_T2(5000),
-				NTATAG_SIP_T4(10000),
-				TAG_IF(dst->route_uri, NUTAG_PROXY(dst->route_uri)), TAG_IF(dst->route, SIPTAG_ROUTE_STR(dst->route)), TAG_END());
+	nua_options(nh, NTATAG_SIP_T2(5000), NTATAG_SIP_T4(10000), TAG_IF(route_uri, NUTAG_PROXY(route_uri)), TAG_IF(dst->route, SIPTAG_ROUTE_STR(dst->route)), TAG_END());
 
 	sofia_glue_free_destination(dst);
+    switch_safe_free(route_uri);
 
 	return 0;
 }
@@ -622,25 +624,6 @@ int sofia_reg_del_callback(void *pArg, int argc, char **argv, char **columnNames
 			switch_event_add_header_string(s_event, SWITCH_STACK_BOTTOM, "user-agent", argv[7]);
 			switch_event_fire(&s_event);
 		}
-
-		if (switch_event_create(&s_event, SWITCH_EVENT_PRESENCE_IN) == SWITCH_STATUS_SUCCESS) {
-			switch_event_add_header_string(s_event, SWITCH_STACK_BOTTOM, "proto", SOFIA_CHAT_PROTO);
-			switch_event_add_header_string(s_event, SWITCH_STACK_BOTTOM, "rpid", "away");
-			switch_event_add_header_string(s_event, SWITCH_STACK_BOTTOM, "login", profile->url);
-
-			if (argv[4]) {
-				switch_event_add_header_string(s_event, SWITCH_STACK_BOTTOM, "user-agent", argv[4]);
-			}
-
-			if (argv[1] && argv[2]) {
-				switch_event_add_header(s_event, SWITCH_STACK_BOTTOM, "from", "%s@%s", argv[1], argv[2]);
-			}
-
-			switch_event_add_header_string(s_event, SWITCH_STACK_BOTTOM, "status", "Unregistered");
-			switch_event_add_header_string(s_event, SWITCH_STACK_BOTTOM, "event_type", "presence");
-			switch_event_fire(&s_event);
-		}
-
 	}
 	return 0;
 }
@@ -1045,7 +1028,6 @@ uint8_t sofia_reg_handle_register(nua_t *nua, sofia_profile_t *profile, nua_hand
 	uint8_t stale = 0, forbidden = 0;
 	auth_res_t auth_res = AUTH_OK;
 	long exptime = 300;
-	switch_event_t *event;
 	const char *rpid = "unknown";
 	const char *display = "\"user\"";
 	char network_ip[80];
@@ -1631,28 +1613,6 @@ uint8_t sofia_reg_handle_register(nua_t *nua, sofia_profile_t *profile, nua_hand
 		}
 
 	} else {
-		int send = 1;
-
-		if (multi_reg) {
-			if (sofia_reg_reg_count(profile, to_user, sub_host) > 0) {
-				send = 0;
-			}
-		}
-
-		if (send && switch_event_create(&event, SWITCH_EVENT_PRESENCE_IN) == SWITCH_STATUS_SUCCESS) {
-			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "proto", SOFIA_CHAT_PROTO);
-			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "rpid", rpid);
-			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "login", profile->url);
-			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "user-agent",
-										   (sip && sip->sip_user_agent) ? sip->sip_user_agent->g_string : "unknown");
-			switch_event_add_header(event, SWITCH_STACK_BOTTOM, "from", "%s@%s", to_user, sub_host);
-			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "status", "Unregistered");
-			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "presence-source", "register");
-			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "event_type", "presence");
-			switch_event_fire(&event);
-		}
-		
-
 		if (multi_reg) {
 			char *icontact, *p;
 			icontact = sofia_glue_get_url_from_contact(contact_str, 1);
@@ -1727,16 +1687,6 @@ uint8_t sofia_reg_handle_register(nua_t *nua, sofia_profile_t *profile, nua_hand
 							switch_event_add_header_string(s_event, SWITCH_STACK_BOTTOM, "alt_event_type", "dialog");
 							switch_event_fire(&s_event);
 						}
-					} else {
-						if (switch_event_create(&s_event, SWITCH_EVENT_PRESENCE_IN) == SWITCH_STATUS_SUCCESS) {
-							switch_event_add_header_string(s_event, SWITCH_STACK_BOTTOM, "proto", SOFIA_CHAT_PROTO);
-							switch_event_add_header_string(s_event, SWITCH_STACK_BOTTOM, "login", profile->name);
-							switch_event_add_header_string(s_event, SWITCH_STACK_BOTTOM, "presence-source", "register");
-							switch_event_add_header(s_event, SWITCH_STACK_BOTTOM, "from", "%s@%s", to_user, sub_host);
-							switch_event_add_header_string(s_event, SWITCH_STACK_BOTTOM, "rpid", "unknown");
-							switch_event_add_header_string(s_event, SWITCH_STACK_BOTTOM, "status", "Registered");
-							switch_event_fire(&s_event);
-						}		
 					}
 				}
 			} else {

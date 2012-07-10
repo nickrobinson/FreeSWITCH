@@ -1,4 +1,4 @@
-LAME=lame-3.98.4
+LAME=lame-3.99.1
 SHOUT=libshout-2.2.2
 MPG123=mpg123-1.13.2
 BASE=../../../..
@@ -15,7 +15,7 @@ LAMELA=$(LAME_BUILDDIR)/libmp3lame/libmp3lame.la
 SHOUTLA=$(SHOUT_BUILDDIR)/src/libshout.la
 MPG123LA=$(MPG123_BUILDDIR)/src/libmpg123/libmpg123.la
 
-LOCAL_CFLAGS=-I$(SHOUT_DIR)/include -I$(LAME_DIR)/include -I$(MPG123_DIR)/src  -I$(MPG123_BUILDDIR)/src -I$(SHOUT_BUILDDIR)/include 
+LOCAL_CFLAGS=-I$(SHOUT_DIR)/include -I$(LAME_DIR)/include -I$(LAME_DIR)/libmp3lame -I$(MPG123_DIR)/src  -I$(MPG123_BUILDDIR)/src -I$(SHOUT_BUILDDIR)/include
 LOCAL_LIBADD=$(LAMELA) $(SHOUTLA) $(MPG123LA)
 LOCAL_LDFLAGS=`cat $(SHOUT_BUILDDIR)/Makefile | grep SPEEX_LIBS | sed -e 's|^SPEEX_LIBS =||'`  `cat $(SHOUTLA) | grep dependency_libs  | sed -e 's|^dependency_libs=||' | sed -e "s|'||g"`
 
@@ -36,7 +36,7 @@ $(MPG123LA): $(MPG123_BUILDDIR)/Makefile
 	$(TOUCH_TARGET)
 
 $(LAME_DIR):
-	$(GETLIB) $(LAME).tar.gz
+	$(GETLIB) http://sourceforge.net/projects/lame/files/lame/3.99 $(LAME).tar.gz
 
 $(LAME_BUILDDIR)/Makefile: $(LAME_DIR)
 	mkdir -p $(LAME_BUILDDIR)

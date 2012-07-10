@@ -36,6 +36,7 @@
 #include <switch.h>
 #include <shout/shout.h>
 #include <lame.h>
+#include <lame_global_flags.h>
 #include <switch_curl.h>
 
 #define OUTSCALE 8192 * 2
@@ -190,7 +191,8 @@ static inline void free_context(shout_context_t *context)
 				ret = fwrite(mp3buffer, 1, len, context->fp);
 			}
 
-			while ((len = lame_encode_flush(context->gfp, mp3buffer, sizeof(mp3buffer))) > 0) {
+            /* The following check of context->gfp can be removed, once the lame library has be updated to lame 3.99 */
+			while ((context->gfp != NULL && context->gfp->class_id == 0xFFF88E3B) && (len = lame_encode_flush(context->gfp, mp3buffer, sizeof(mp3buffer))) > 0) {
 				ret = fwrite(mp3buffer, 1, len, context->fp);
 				if (ret < 0) {
 					break;
@@ -205,7 +207,7 @@ static inline void free_context(shout_context_t *context)
 
 		if (context->shout) {
 			if (context->gfp) {
-				unsigned char mp3buffer[8192];
+				unsigned char mp3buffer[20480];
 				int len;
 				int16_t blank[2048] = { 0 }, *r = NULL;
 
@@ -222,7 +224,8 @@ static inline void free_context(shout_context_t *context)
 					}
 				}
 
-				while ((len = lame_encode_flush(context->gfp, mp3buffer, sizeof(mp3buffer))) > 0) {
+                /* The following check of context->gfp can be removed, once the lame library has be updated to lame 3.99 */
+				while ((context->gfp != NULL && context->gfp->class_id == 0xFFF88E3B) && (len = lame_encode_flush(context->gfp, mp3buffer, sizeof(mp3buffer))) > 0) {
 					ret = shout_send(context->shout, mp3buffer, len);
 
 					if (ret != SHOUTERR_SUCCESS) {
