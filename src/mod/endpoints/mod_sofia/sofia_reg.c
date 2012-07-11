@@ -551,11 +551,12 @@ int sofia_reg_nat_callback(void *pArg, int argc, char **argv, char **columnNames
 {
 	sofia_profile_t *profile = (sofia_profile_t *) pArg;
 	nua_handle_t *nh;
-	char to[128] = "";
+	char to[512] = "";
 	sofia_destination_t *dst = NULL;
     char *route_uri = NULL;
 
 	switch_snprintf(to, sizeof(to), "sip:%s@%s", argv[1], argv[2]);
+
 	dst = sofia_glue_get_destination(argv[3]);
 	switch_assert(dst);
 	
@@ -563,7 +564,8 @@ int sofia_reg_nat_callback(void *pArg, int argc, char **argv, char **columnNames
 		route_uri = sofia_glue_strip_uri(dst->route_uri);
 	}
 
-	nh = nua_handle(profile->nua, NULL, SIPTAG_FROM_STR(profile->url), SIPTAG_TO_STR(to), NUTAG_URL(dst->contact), SIPTAG_CONTACT_STR(profile->url), TAG_END());
+	nh = nua_handle(profile->nua, NULL, SIPTAG_FROM_STR(profile->url), SIPTAG_TO_STR(to), NUTAG_URL(dst->contact), SIPTAG_CONTACT_STR(profile->url),
+					SIPTAG_CALL_ID_STR(argv[0]), TAG_END());
 	nua_handle_bind(nh, &mod_sofia_globals.destroy_private);
 	nua_options(nh, NTATAG_SIP_T2(5000), NTATAG_SIP_T4(10000), TAG_IF(route_uri, NUTAG_PROXY(route_uri)), TAG_IF(dst->route, SIPTAG_ROUTE_STR(dst->route)), TAG_END());
 
