@@ -1483,6 +1483,7 @@ static int sofia_presence_sub_reg_callback(void *pArg, int argc, char **argv, ch
 			switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Message-Account", "sip:%s@%s", user, host);
 			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "VM-Sofia-Profile", profile->name);
 			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "VM-sub-call-id", argv[7]);
+		    switch_event_add_header(event, SWITCH_STACK_BOTTOM, "VM-From", "%s@%s", user, host);
 			switch_event_fire(&event);
 		}
 		return 0;
@@ -2451,6 +2452,7 @@ static int sofia_presence_sub_callback(void *pArg, int argc, char **argv, char *
 		const char *force_event_status = switch_str_nil(switch_event_get_header(helper->event, "force-status"));
 		const char *astate = switch_str_nil(switch_event_get_header(helper->event, "astate"));
 		const char *answer_state = switch_str_nil(switch_event_get_header(helper->event, "answer-state"));
+		const char *force_full = switch_str_nil(switch_event_get_header(helper->event, "force-full-dialog"));
 		const char *dft_state;
 		const char *from_id = NULL, *from_name = NULL;
 		const char *to_user = switch_str_nil(switch_event_get_header(helper->event, "variable_sip_to_user"));
@@ -2462,7 +2464,7 @@ static int sofia_presence_sub_callback(void *pArg, int argc, char **argv, char *
 		char *call_info_state = switch_event_get_header(helper->event, "presence-call-info-state");
 		int term = 0;
 
-		if (user_agent && switch_stristr("snom", user_agent) && uuid) {
+		if ((user_agent && switch_stristr("snom", user_agent) && uuid) || !strcasecmp(force_full, "true")) {
 			default_dialog = "full" ;
 		}
 		
