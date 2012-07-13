@@ -1397,7 +1397,7 @@ uint8_t sofia_reg_handle_register(nua_t *nua, sofia_profile_t *profile, nua_hand
 
 		if (auth_res != AUTH_OK && auth_res != AUTH_RENEWED && !stale) {
 			if (auth_res == AUTH_FORBIDDEN) {
-				nua_respond(nh, SIP_403_FORBIDDEN, NUTAG_WITH_THIS_MSG(de->data->e_msg), TAG_END());
+				nua_respond(nh, SIP_503_SERVICE_UNAVAILABLE, NUTAG_WITH_THIS_MSG(de->data->e_msg), TAG_END());
 				forbidden = 1;
 			} else {
 				nua_respond(nh, SIP_401_UNAUTHORIZED, NUTAG_WITH_THIS_MSG(de->data->e_msg), TAG_END());
@@ -1816,7 +1816,7 @@ void sofia_reg_handle_sip_i_register(nua_t *nua, sofia_profile_t *profile, nua_h
 	}
 
 	if (!(profile->mflags & MFLAG_REGISTER)) {
-		nua_respond(nh, SIP_403_FORBIDDEN, NUTAG_WITH_THIS_MSG(de->data->e_msg), TAG_END());
+		nua_respond(nh, SIP_503_SERVICE_UNAVAILABLE, NUTAG_WITH_THIS_MSG(de->data->e_msg), TAG_END());
 		goto end;
 	}
 
@@ -1880,7 +1880,7 @@ void sofia_reg_handle_sip_i_register(nua_t *nua, sofia_profile_t *profile, nua_h
 			type = REG_AUTO_REGISTER;
 		} else if (!ok) {
 			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "IP %s Rejected by register acl \"%s\"\n", network_ip, profile->reg_acl[x]);
-			nua_respond(nh, SIP_403_FORBIDDEN, NUTAG_WITH_THIS_MSG(de->data->e_msg), TAG_END());
+			nua_respond(nh, SIP_503_SERVICE_UNAVAILABLE, NUTAG_WITH_THIS_MSG(de->data->e_msg), TAG_END());
 			goto end;
 		}
 	}
