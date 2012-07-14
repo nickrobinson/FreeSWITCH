@@ -63,7 +63,7 @@ typedef enum {
 
 struct listener {
         uint32_t id;
-        switch_socket_t *sock;
+        int clientfd;
         switch_queue_t *event_queue;
         switch_queue_t *log_queue;
         switch_memory_pool_t *pool;
@@ -76,11 +76,10 @@ struct listener {
         switch_core_session_t *session;
         int lost_events;
         int lost_logs;
-        switch_sockaddr_t *sa;
         char remote_ip[50];
-        switch_port_t remote_port;
+        char *peer_nodename;
+        struct ei_cnode_s *ec;
         struct listener *next;
-        switch_pollfd_t *pollfd;
 };
 
 typedef struct listener listener_t;
@@ -888,6 +887,7 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
         switch_socket_t *inbound_socket = NULL;
         listener_t *listener;
         struct ei_cnode_s ec; /* erlang c node interface connection */
+        ErlConnect conn;
         int clientfd;
         int epmdfd;
         uint32_t x = 0;
@@ -934,7 +934,7 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
         }
 
         /* try to initialize the erlang interface */
-        if (SWITCH_STATUS_SUCCESS != initialise_ei(&ec)) {
+        if (SWITCH_STATUS_SUCCESS != initialise_ei(&ec, sa)) {
                 goto init_failed;
         }
 
@@ -958,24 +958,30 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
         listen_list.ready = 1;
 
         while (!prefs.done) {
-                if (switch_core_new_memory_pool(&listener_pool) != SWITCH_STATUS_SUCCESS) {
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "OH OH no pool\n");
-                        goto fail;
-                }
+                /* zero out errno because ei_accept doesn't differentiate between a
+                 * failed authentication or a socket failure, or a client version
+                 * mismatch or a godzilla attack */
+                errno = 0;
 
-                if ((status = switch_socket_accept(&inbound_socket, listen_list.sock, listener_pool))) {
+                if ((clientfd = ei_accept_tmo(&ec, (int) listen_list.sock, &conn, 500)) == ERL_ERROR) {
                         if (prefs.done) {
                                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "Shutting Down\n");
-                                goto end;
+                                break;
+                        } else if (erl_errno == ETIMEDOUT) {
+                                continue;
+                        } else if (errno) {
+                                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Socket Error %d %d\n", erl_errno, errno);
                         } else {
-                                /* I wish we could use strerror_r here but its not defined everywhere =/ */
-                                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Socket Error [%s]\n", strerror(errno));
-                                if (++errs > 100) {
-                                        goto end;
-                                }
+                                /* if errno didn't get set, assume nothing *too* horrible occured */
+                                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE,
+                                                                  "Ignorable error in ei_accept - probable bad client version, bad cookie or bad nodename\n");
                         }
-                } else {
-                        errs = 0;
+                        continue;
+                }
+
+                if (switch_core_new_memory_pool(&listener_pool) != SWITCH_STATUS_SUCCESS) {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "OH OH no pool\n");
+                        break;
                 }
 
                 if (!(listener = switch_core_alloc(listener_pool, sizeof(*listener)))) {
@@ -983,13 +989,20 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
                         break;
                 }
 
+                /* paranoid and unnecessary clean up of our allocation */
+                memset(listener, 0, sizeof(*listener));
+
                 switch_thread_rwlock_create(&listener->rwlock, listener_pool);
                 switch_queue_create(&listener->event_queue, MAX_QUEUE_LEN, listener_pool);
                 switch_queue_create(&listener->log_queue, MAX_QUEUE_LEN, listener_pool);
 
-                listener->sock = inbound_socket;
+                listener->clientfd = clientfd;
+
                 listener->pool = listener_pool;
                 listener_pool = NULL;
+
+                listener->ec = switch_core_alloc(listener->pool, sizeof(ei_cnode));
+                memcpy(listener->ec, ec, sizeof(ei_cnode));
 
                 switch_set_flag(listener, LFLAG_FULL);
                 switch_set_flag(listener, LFLAG_ALLOW_LOG);
@@ -997,19 +1010,14 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
                 switch_mutex_init(&listener->flag_mutex, SWITCH_MUTEX_NESTED, listener->pool);
 
                 switch_core_hash_init(&listener->event_hash, listener->pool);
-                switch_socket_create_pollset(&listener->pollfd, listener->sock, SWITCH_POLLIN | SWITCH_POLLERR, listener->pool);
 
-                if (switch_socket_addr_get(&listener->sa, SWITCH_TRUE, listener->sock) == SWITCH_STATUS_SUCCESS && listener->sa) {
-                        switch_get_addr(listener->remote_ip, sizeof(listener->remote_ip), listener->sa);
-                        if (listener->sa && (listener->remote_port = switch_sockaddr_get_port(listener->sa))) {
-                                launch_listener_thread(listener);
-                                continue;
-                        }
-                }
+                /* store the IP and node name we are talking with */
+                switch_inet_ntop(AF_INET, conn.ipadr, listener->remote_ip, sizeof(listener->remote_ip));
+                listener->peer_nodename = switch_core_strdup(listener->pool, conn.nodename);
 
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Error initilizing connection\n");
-                close_socket(&listener->sock);
-                //expire_listener(&listener);
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "New erlang connection from node(%s) %s\n", listener->remote_ip, listener->peer_nodename);
+
+                launch_listener_thread(listener);
         }
 
   end:
@@ -1042,33 +1050,15 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
 
 
 
-switch_status_t initialise_ei(struct ei_cnode_s *ec)
+switch_status_t initialise_ei(struct ei_cnode_s *ec, switch_sockaddr_t *sa)
 {
         switch_status_t rv;
-        struct sockaddr_in server_addr;
         struct hostent *nodehost;
         char thishostname[EI_MAXHOSTNAMELEN + 1] = "";
         char thisnodename[MAXNODELEN + 1];
         char thisalivename[EI_MAXALIVELEN + 1];
         //EI_MAX_COOKIE_SIZE+1
         char *ampersand;
-
-        /* zero out the struct before we use it */
-        memset(&server_addr, 0, sizeof(server_addr));
-
-        /* convert the configured IP to network byte order, handing errors */
-        rv = switch_inet_pton(AF_INET, prefs.ip, &server_addr.sin_addr.s_addr);
-        if (rv == 0) {
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Could not parse invalid ip address: %s\n", prefs.ip);
-                return SWITCH_STATUS_FALSE;
-        } else if (rv == -1) {
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Error when parsing ip address %s : %s\n", prefs.ip, strerror(errno));
-                return SWITCH_STATUS_FALSE;
-        }
-
-        /* set the address family and port */
-        server_addr.sin_family = AF_INET;
-        server_addr.sin_port = htons(prefs.port);
 
         /* copy the erlang interface nodename into something we can modify */
         strncpy(thisalivename, prefs.ei_nodename, MAXNODELEN);
@@ -1103,7 +1093,7 @@ switch_status_t initialise_ei(struct ei_cnode_s *ec)
                         }
 
                 }
-                snprintf(thisnodename, MAXNODELEN + 1, "%s@%s", prefs.nodename, thishostname);
+                snprintf(thisnodename, MAXNODELEN + 1, "%s@%s", prefs.ei_nodename, thishostname);
         }
 
         /* init the ec stuff */
