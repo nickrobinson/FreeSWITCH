@@ -136,14 +136,12 @@ SWITCH_DECLARE_GLOBAL_STRING_FUNC(set_pref_ip, prefs.ip);
 SWITCH_DECLARE_GLOBAL_STRING_FUNC(set_pref_ei_cookie, prefs.ei_cookie);
 SWITCH_DECLARE_GLOBAL_STRING_FUNC(set_pref_ei_nodename, prefs.ei_nodename);
 
-
 /* Function Definitions */
 static void *SWITCH_THREAD_FUNC listener_run(switch_thread_t *thread, void *obj);
 static void launch_listener_thread(listener_t *listener);
 static void remove_listener(listener_t *listener);
 static void kill_listener(listener_t *l);
 static void kill_all_listeners(void);
-
 
 static switch_status_t log_handler(const switch_log_node_t *node, switch_log_level_t level)
 {
@@ -286,17 +284,6 @@ static void event_handler(switch_event_t *event)
         switch_mutex_unlock(globals.listener_mutex);
 }
 
-static void close_socket(switch_socket_t ** sock)
-{
-        switch_mutex_lock(listen_list.sock_mutex);
-        if (*sock) {
-                switch_socket_shutdown(*sock, SWITCH_SHUTDOWN_READWRITE);
-                switch_socket_close(*sock);
-                *sock = NULL;
-        }
-        switch_mutex_unlock(listen_list.sock_mutex);
-}
-
 static void add_listener(listener_t *listener)
 {
         /* add me to the listeners so I get events */
@@ -375,7 +362,7 @@ static listener_t *find_listener(uint32_t id)
 
         switch_mutex_lock(globals.listener_mutex);
         for (l = listen_list.listeners; l; l = l->next) {
-                if (l->id && l->id == id && !l->expire_time) {
+                if (l->id && l->id == id) {
                         if (switch_thread_rwlock_tryrdlock(l->rwlock) == SWITCH_STATUS_SUCCESS) {
                                 r = l;
                         }
@@ -384,6 +371,17 @@ static listener_t *find_listener(uint32_t id)
         }
         switch_mutex_unlock(globals.listener_mutex);
         return r;
+}
+
+static void close_socket(switch_socket_t ** sock)
+{
+        switch_mutex_lock(listen_list.sock_mutex);
+        if (*sock) {
+                switch_socket_shutdown(*sock, SWITCH_SHUTDOWN_READWRITE);
+                switch_socket_close(*sock);
+                *sock = NULL;
+        }
+        switch_mutex_unlock(listen_list.sock_mutex);
 }
 
 /*
@@ -418,8 +416,10 @@ static void *SWITCH_THREAD_FUNC listener_run(switch_thread_t *thread, void *obj)
         switch_thread_rwlock_wrlock(listener->rwlock);
         flush_listener(listener, SWITCH_TRUE, SWITCH_TRUE);
 
-        if (listener->sock) {
-                close_socket(&listener->sock);
+        if (listener->clientfd) {
+              shutdown(listener->clientfd, SHUT_RDWR);
+              close(listener->clientfd);
+              listener->clientfd = NULL;
         }
 
         switch_thread_rwlock_unlock(listener->rwlock);
