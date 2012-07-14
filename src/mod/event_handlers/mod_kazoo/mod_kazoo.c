@@ -64,6 +64,11 @@ typedef enum {
         LFLAG_ALLOW_LOG = (1 << 16)
 } event_flag_t;
 
+typedef enum {
+        ERLANG_STRING = 0,
+        ERLANG_BINARY
+} erlang_encoding_t;
+
 struct listener {
         uint32_t id;
         int clientfd;
@@ -116,10 +121,11 @@ static struct {
         char *ei_nodename;
         switch_bool_t ei_shortname;
         int ei_compat_rel;
+        erlang_encoding_t encoding;
 } prefs;
 
 static void remove_listener(listener_t *listener);
-static void kill_listener(listener_t *l, const char *message);
+static void kill_listener(listener_t *l);
 static void kill_all_listeners(void);
 
 static uint32_t next_id(void)
@@ -132,7 +138,8 @@ static uint32_t next_id(void)
 }
 
 SWITCH_DECLARE_GLOBAL_STRING_FUNC(set_pref_ip, prefs.ip);
-SWITCH_DECLARE_GLOBAL_STRING_FUNC(set_pref_pass, prefs.ei_cookie);
+SWITCH_DECLARE_GLOBAL_STRING_FUNC(set_pref_ei_cookie, prefs.ei_cookie);
+SWITCH_DECLARE_GLOBAL_STRING_FUNC(set_pref_ei_nodename, prefs.ei_nodename);
 
 static void *SWITCH_THREAD_FUNC listener_run(switch_thread_t *thread, void *obj);
 static void launch_listener_thread(listener_t *listener);
@@ -160,7 +167,7 @@ static switch_status_t log_handler(const switch_log_node_t *node, switch_log_lev
                         } else {
                                 switch_log_node_free(&dnode);
                                 if (++l->lost_logs > MAX_MISSED) {
-                                        kill_listener(l, NULL);
+                                        kill_listener(l);
                                 }
                         }
                 }
@@ -169,30 +176,6 @@ static switch_status_t log_handler(const switch_log_node_t *node, switch_log_lev
 
         return SWITCH_STATUS_SUCCESS;
 }
-
-static void flush_listener(listener_t *listener, switch_bool_t flush_log, switch_bool_t flush_events)
-{
-        void *pop;
-
-        if (listener->log_queue) {
-                while (switch_queue_trypop(listener->log_queue, &pop) == SWITCH_STATUS_SUCCESS) {
-                        switch_log_node_t *dnode = (switch_log_node_t *) pop;
-                        if (dnode) {
-                                switch_log_node_free(&dnode);
-                        }
-                }
-        }
-
-        if (listener->event_queue) {
-                while (switch_queue_trypop(listener->event_queue, &pop) == SWITCH_STATUS_SUCCESS) {
-                        switch_event_t *pevent = (switch_event_t *) pop;
-                        if (!pop)
-                                continue;
-                        switch_event_destroy(&pevent);
-                }
-        }
-}
-
 
 // This will be removed, this is for reference
 static switch_status_t expire_listener(listener_t ** listener)
@@ -289,7 +272,7 @@ static void event_handler(switch_event_t *event)
                                         }
                                 } else {
                                         if (++l->lost_events > MAX_MISSED) {
-                                                kill_listener(l, NULL);
+                                                kill_listener(l);
                                         }
                                         switch_event_destroy(&clone);
                                 }
@@ -322,6 +305,29 @@ static void add_listener(listener_t *listener)
         switch_mutex_unlock(globals.listener_mutex);
 }
 
+static void flush_listener(listener_t *listener, switch_bool_t flush_log, switch_bool_t flush_events)
+{
+        void *pop;
+
+        if (listener->log_queue) {
+                while (switch_queue_trypop(listener->log_queue, &pop) == SWITCH_STATUS_SUCCESS) {
+                        switch_log_node_t *dnode = (switch_log_node_t *) pop;
+                        if (dnode) {
+                                switch_log_node_free(&dnode);
+                        }
+                }
+        }
+
+        if (listener->event_queue) {
+                while (switch_queue_trypop(listener->event_queue, &pop) == SWITCH_STATUS_SUCCESS) {
+                        switch_event_t *pevent = (switch_event_t *) pop;
+                        if (!pop)
+                                continue;
+                        switch_event_destroy(&pevent);
+                }
+        }
+}
+
 static void remove_listener(listener_t *listener)
 {
         listener_t *l, *last = NULL;
@@ -340,41 +346,8 @@ static void remove_listener(listener_t *listener)
         switch_mutex_unlock(globals.listener_mutex);
 }
 
-static void send_disconnect(listener_t *listener, const char *message)
+static void kill_listener(listener_t *l)
 {
-
-        char disco_buf[512] = "";
-        switch_size_t len, mlen;
-
-        if (zstr(message)) {
-                message = "Disconnected.\n";
-        }
-
-        mlen = strlen(message);
-
-        if (listener->session) {
-                switch_snprintf(disco_buf, sizeof(disco_buf), "Content-Type: text/disconnect-notice\n"
-                                                "Controlled-Session-UUID: %s\n"
-                                                "Content-Disposition: disconnect\n" "Content-Length: %d\n\n", switch_core_session_get_uuid(listener->session), mlen);
-        } else {
-                switch_snprintf(disco_buf, sizeof(disco_buf), "Content-Type: text/disconnect-notice\nContent-Length: %d\n\n", mlen);
-        }
-
-        len = strlen(disco_buf);
-        switch_socket_send(listener->sock, disco_buf, &len);
-        if (len > 0) {
-                len = mlen;
-                switch_socket_send(listener->sock, message, &len);
-        }
-}
-
-static void kill_listener(listener_t *l, const char *message)
-{
-
-        if (message) {
-                send_disconnect(l, message);
-        }
-
         switch_clear_flag(l, LFLAG_RUNNING);
         if (l->sock) {
                 switch_socket_shutdown(l->sock, SWITCH_SHUTDOWN_READWRITE);
@@ -389,7 +362,7 @@ static void kill_all_listeners(void)
 
         switch_mutex_lock(globals.listener_mutex);
         for (l = listen_list.listeners; l; l = l->next) {
-                kill_listener(l, "The system is being shut down.\n");
+                kill_listener(l);
         }
         switch_mutex_unlock(globals.listener_mutex);
 }
@@ -412,324 +385,49 @@ static listener_t *find_listener(uint32_t id)
         return r;
 }
 
-struct api_command_struct {
-        char *api_cmd;
-        char *arg;
-        listener_t *listener;
-        char uuid_str[SWITCH_UUID_FORMATTED_LENGTH + 1];
-        int bg;
-        int ack;
-        int console_execute;
-        switch_memory_pool_t *pool;
-};
-
+/*
 static void *SWITCH_THREAD_FUNC api_exec(switch_thread_t *thread, void *obj)
 {
-
-        struct api_command_struct *acs = (struct api_command_struct *) obj;
-        switch_stream_handle_t stream = { 0 };
-        char *reply, *freply = NULL;
-        switch_status_t status;
-
-        switch_mutex_lock(globals.listener_mutex);
-        prefs.threads++;
-        switch_mutex_unlock(globals.listener_mutex);
-
-
-        if (!acs) {
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Internal error.\n");
-                goto cleanup;
-        }
-
-        if (!acs->listener || !switch_test_flag(acs->listener, LFLAG_RUNNING) ||
-                !acs->listener->rwlock || switch_thread_rwlock_tryrdlock(acs->listener->rwlock) != SWITCH_STATUS_SUCCESS) {
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Error! cannot get read lock.\n");
-                acs->ack = -1;
-                goto done;
-        }
-
-        acs->ack = 1;
-
-        SWITCH_STANDARD_STREAM(stream);
-
-        if (acs->console_execute) {
-                if ((status = switch_console_execute(acs->api_cmd, 0, &stream)) != SWITCH_STATUS_SUCCESS) {
-                        stream.write_function(&stream, "-ERR %s Command not found!\n", acs->api_cmd);
-                }
-        } else {
-                status = switch_api_execute(acs->api_cmd, acs->arg, NULL, &stream);
-        }
-
-        if (status == SWITCH_STATUS_SUCCESS) {
-                reply = stream.data;
-        } else {
-                freply = switch_mprintf("-ERR %s Command not found!\n", acs->api_cmd);
-                reply = freply;
-        }
-
-        if (!reply) {
-                reply = "Command returned no output!";
-        }
-
-        if (acs->bg) {
-                switch_event_t *event;
-
-                if (switch_event_create(&event, SWITCH_EVENT_BACKGROUND_JOB) == SWITCH_STATUS_SUCCESS) {
-                        switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Job-UUID", acs->uuid_str);
-                        switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Job-Command", acs->api_cmd);
-                        if (acs->arg) {
-                                switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Job-Command-Arg", acs->arg);
-                        }
-                        switch_event_add_body(event, "%s", reply);
-                        switch_event_fire(&event);
-                }
-        } else {
-                switch_size_t rlen, blen;
-                char buf[1024] = "";
-
-                if (!(rlen = strlen(reply))) {
-                        reply = "-ERR no reply\n";
-                        rlen = strlen(reply);
-                }
-
-                switch_snprintf(buf, sizeof(buf), "Content-Type: api/response\nContent-Length: %" SWITCH_SSIZE_T_FMT "\n\n", rlen);
-                blen = strlen(buf);
-                switch_socket_send(acs->listener->sock, buf, &blen);
-                switch_socket_send(acs->listener->sock, reply, &rlen);
-        }
-
-        switch_safe_free(stream.data);
-        switch_safe_free(freply);
-
-        if (acs->listener->rwlock) {
-                switch_thread_rwlock_unlock(acs->listener->rwlock);
-        }
-
-  done:
-
-        if (acs->bg) {
-                switch_memory_pool_t *pool = acs->pool;
-                if (acs->ack == -1) {
-                        int sanity = 2000;
-                        while (acs->ack == -1) {
-                                switch_cond_next();
-                                if (--sanity <= 0)
-                                        break;
-                        }
-                }
-
-                acs = NULL;
-                switch_core_destroy_memory_pool(&pool);
-                pool = NULL;
-
-        }
-
-  cleanup:
-        switch_mutex_lock(globals.listener_mutex);
-        prefs.threads--;
-        switch_mutex_unlock(globals.listener_mutex);
-
-        return NULL;
-
 }
+*/
 
 static void *SWITCH_THREAD_FUNC listener_run(switch_thread_t *thread, void *obj)
 {
         listener_t *listener = (listener_t *) obj;
-        char buf[1024];
-        switch_size_t len;
-        switch_status_t status;
-        switch_event_t *event;
-        char reply[512] = "";
-        switch_core_session_t *session = NULL;
-        switch_channel_t *channel = NULL;
-        switch_event_t *revent = NULL;
-        const char *var;
-        int locked = 1;
+
+        switch_assert(listener != NULL);
 
         switch_mutex_lock(globals.listener_mutex);
         prefs.threads++;
         switch_mutex_unlock(globals.listener_mutex);
 
-        switch_assert(listener != NULL);
-
-        if ((session = listener->session)) {
-                if (switch_core_session_read_lock(session) != SWITCH_STATUS_SUCCESS) {
-                        locked = 0;
-                        goto done;
-                }
-        }
-
-        switch_socket_opt_set(listener->sock, SWITCH_SO_TCP_NODELAY, TRUE);
-        switch_socket_opt_set(listener->sock, SWITCH_SO_NONBLOCK, TRUE);
-
-        if (prefs.acl_count && listener->sa && !zstr(listener->remote_ip)) {
-                uint32_t x = 0;
-
-                for (x = 0; x < prefs.acl_count; x++) {
-                        if (!switch_check_network_list_ip(listener->remote_ip, prefs.acl[x])) {
-                                const char message[] = "Access Denied, go away.\n";
-                                int mlen = strlen(message);
-
-                                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_WARNING, "IP %s Rejected by acl \"%s\"\n", listener->remote_ip,
-                                                                  prefs.acl[x]);
-
-                                switch_snprintf(buf, sizeof(buf), "Content-Type: text/rude-rejection\nContent-Length: %d\n\n", mlen);
-                                len = strlen(buf);
-                                switch_socket_send(listener->sock, buf, &len);
-                                len = mlen;
-                                switch_socket_send(listener->sock, message, &len);
-                                goto done;
-                        }
-                }
-        }
-
-        if (globals.debug > 0) {
-                if (zstr(listener->remote_ip)) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "Connection Open\n");
-                } else {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "Connection Open from %s:%d\n", listener->remote_ip,
-                                                          listener->remote_port);
-                }
-        }
-
-        switch_socket_opt_set(listener->sock, SWITCH_SO_NONBLOCK, TRUE);
-        switch_set_flag_locked(listener, LFLAG_RUNNING);
         add_listener(listener);
 
-        if (session && switch_test_flag(listener, LFLAG_AUTHED)) {
-                switch_event_t *ievent = NULL;
-
-                switch_set_flag_locked(listener, LFLAG_SESSION);
-                status = read_packet(listener, &ievent, 25);
-
-                if (status != SWITCH_STATUS_SUCCESS || !ievent) {
-                        switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_CRIT, "Socket Error!\n");
-                        switch_clear_flag_locked(listener, LFLAG_RUNNING);
-                        goto done;
-                }
-
-
-                if (parse_command(listener, &ievent, reply, sizeof(reply)) != SWITCH_STATUS_SUCCESS) {
-                        switch_clear_flag_locked(listener, LFLAG_RUNNING);
-                        goto done;
-                }
-
-
-        } else {
-                switch_snprintf(buf, sizeof(buf), "Content-Type: auth/request\n\n");
-
-                len = strlen(buf);
-                switch_socket_send(listener->sock, buf, &len);
-
-                while (!switch_test_flag(listener, LFLAG_AUTHED)) {
-                        status = read_packet(listener, &event, 25);
-                        if (status != SWITCH_STATUS_SUCCESS) {
-                                goto done;
-                        }
-                        if (!event) {
-                                continue;
-                        }
-
-                        if (parse_command(listener, &event, reply, sizeof(reply)) != SWITCH_STATUS_SUCCESS) {
-                                switch_clear_flag_locked(listener, LFLAG_RUNNING);
-                                goto done;
-                        }
-                        if (*reply != '\0') {
-                                if (*reply == '~') {
-                                        switch_snprintf(buf, sizeof(buf), "Content-Type: command/reply\n%s", reply + 1);
-                                } else {
-                                        switch_snprintf(buf, sizeof(buf), "Content-Type: command/reply\nReply-Text: %s\n\n", reply);
-                                }
-                                len = strlen(buf);
-                                switch_socket_send(listener->sock, buf, &len);
-                        }
-                        break;
-                }
-        }
-
-        while (!prefs.done && switch_test_flag(listener, LFLAG_RUNNING) && listen_list.ready) {
-                len = sizeof(buf);
-                memset(buf, 0, len);
-                status = read_packet(listener, &revent, 0);
-
-                if (status != SWITCH_STATUS_SUCCESS) {
-                        break;
-                }
-
-                if (!revent) {
-                        continue;
-                }
-
-                if (parse_command(listener, &revent, reply, sizeof(reply)) != SWITCH_STATUS_SUCCESS) {
-                        switch_clear_flag_locked(listener, LFLAG_RUNNING);
-                        break;
-                }
-
-                if (revent) {
-                        switch_event_destroy(&revent);
-                }
-
-                if (*reply != '\0') {
-                        if (*reply == '~') {
-                                switch_snprintf(buf, sizeof(buf), "Content-Type: command/reply\n%s", reply + 1);
-                        } else {
-                                switch_snprintf(buf, sizeof(buf), "Content-Type: command/reply\nReply-Text: %s\n\n", reply);
-                        }
-                        len = strlen(buf);
-                        switch_socket_send(listener->sock, buf, &len);
-                }
-
-        }
-
-  done:
-
-        if (revent) {
-                switch_event_destroy(&revent);
+        while (!prefs.done && switch_test_flag(listener, LFLAG_RUNNING)) {
+                switch_yield(500000);
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Listener is still running for node(%s) %s\n", listener->remote_ip, listener->peer_nodename);
         }
 
         remove_listener(listener);
 
         if (globals.debug > 0) {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "Session complete, waiting for children\n");
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Shutting down listener for node(%s) %s\n", listener->remote_ip, listener->peer_nodename);
         }
 
         switch_thread_rwlock_wrlock(listener->rwlock);
         flush_listener(listener, SWITCH_TRUE, SWITCH_TRUE);
-        switch_mutex_lock(listener->filter_mutex);
-        if (listener->filters) {
-                switch_event_destroy(&listener->filters);
-        }
-        switch_mutex_unlock(listener->filter_mutex);
-
-        if (listener->session) {
-                channel = switch_core_session_get_channel(listener->session);
-        }
-
-        if (channel && (switch_test_flag(listener, LFLAG_RESUME) || ((var = switch_channel_get_variable(channel, "socket_resume")) && switch_true(var)))) {
-                switch_channel_set_state(channel, CS_RESET);
-        }
 
         if (listener->sock) {
-                send_disconnect(listener, "Disconnected, goodbye.\nSee you at ClueCon! http://www.cluecon.com/\n");
                 close_socket(&listener->sock);
         }
 
         switch_thread_rwlock_unlock(listener->rwlock);
 
         if (globals.debug > 0) {
-                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "Connection Closed\n");
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Node(%s) %s connection closed\n", listener->remote_ip, listener->peer_nodename);
         }
 
         switch_core_hash_destroy(&listener->event_hash);
-
-        if (listener->allowed_event_hash) {
-                switch_core_hash_destroy(&listener->allowed_event_hash);
-        }
-
-        if (listener->allowed_api_hash) {
-                switch_core_hash_destroy(&listener->allowed_api_hash);
-        }
 
         if (listener->session) {
                 switch_channel_clear_flag(switch_core_session_get_channel(listener->session), CF_CONTROLLED);
@@ -737,7 +435,9 @@ static void *SWITCH_THREAD_FUNC listener_run(switch_thread_t *thread, void *obj)
                 if (locked) {
                         switch_core_session_rwunlock(listener->session);
                 }
-        } else if (listener->pool) {
+        }
+
+        if (listener->pool) {
                 switch_memory_pool_t *pool = listener->pool;
                 switch_core_destroy_memory_pool(&pool);
         }
@@ -748,7 +448,6 @@ static void *SWITCH_THREAD_FUNC listener_run(switch_thread_t *thread, void *obj)
 
         return NULL;
 }
-
 
 /* Create a thread for the socket and launch it */
 static void launch_listener_thread(listener_t *listener)
@@ -764,7 +463,7 @@ static void launch_listener_thread(listener_t *listener)
 
 static int config(void)
 {
-        char *cf = "event_socket.conf";
+        char *cf = "kazoo.conf";
         switch_xml_t cfg, xml, settings, param;
 
         memset(&prefs, 0, sizeof(prefs));
@@ -779,16 +478,37 @@ static int config(void)
 
                                 if (!strcmp(var, "listen-ip")) {
                                         set_pref_ip(val);
+                                } else if (!strcmp(var, "listen-port")) {
+                                        prefs.port = (uint16_t) atoi(val);
+                                } else if (!strcmp(var, "cookie")) {
+                                        set_pref_ei_cookie(val);
+                                } else if (!strcmp(var, "cookie-file")) {
+                                        if (read_cookie_from_file(val) == 1) {
+                                                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Unable to read cookie from %s\n", val);
+                                        }
+                                } else if (!strcmp(var, "nodename")) {
+                                        set_pref_ei_nodname(val);
+                                } else if (!strcmp(var, "shortname")) {
+                                        set_pref_ei_shortname(val);
+                                } else if (!strcmp(var, "compat-rel")) {
+                                        if (atoi(val) >= 7)
+                                                prefs.ei_compat_rel = atoi(val);
+                                        else
+                                                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Invalid compatability release '%s' specified\n", val);
                                 } else if (!strcmp(var, "debug")) {
                                         globals.debug = atoi(val);
+                                } else if (!strcmp(var, "encoding")) {
+                                        if (!strcasecmp(val, "string")) {
+                                                prefs.encoding = ERLANG_STRING;
+                                        } else if (!strcasecmp(val, "binary")) {
+                                                prefs.encoding = ERLANG_BINARY;
+                                        } else {
+                                                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Invalid encoding strategy '%s' specified\n", val);
+                                        }
                                 } else if (!strcmp(var, "nat-map")) {
                                         if (switch_true(val) && switch_nat_get_type()) {
                                                 prefs.nat_map = 1;
                                         }
-                                } else if (!strcmp(var, "listen-port")) {
-                                        prefs.port = (uint16_t) atoi(val);
-                                } else if (!strcmp(var, "ei_cookie")) {
-                                        set_pref_pass(val);
                                 } else if (!strcasecmp(var, "apply-inbound-acl") && ! zstr(val)) {
                                         if (prefs.acl_count < MAX_ACL) {
                                                 prefs.acl[prefs.acl_count++] = strdup(val);
@@ -802,18 +522,36 @@ static int config(void)
         }
 
         if (zstr(prefs.ip)) {
-                set_pref_ip("127.0.0.1");
+                set_pref_ip("0.0.0.0");
+        }
+
+        if (!prefs.port) {
+                prefs.port = 8031;
         }
 
         if (zstr(prefs.ei_cookie)) {
-                set_pref_pass("ClueCon");
+                int res;
+                char *home_dir = getenv("HOME");
+                char path_buf[1024];
+
+                if (!zstr(home_dir)) {
+                        /* $HOME/.erlang.cookie */
+                        switch_snprintf(path_buf, sizeof(path_buf), "%s%s%s", home_dir, SWITCH_PATH_SEPARATOR, ".erlang.cookie");
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Checking for cookie at path: %s\n", path_buf);
+
+                        res = read_cookie_from_file(path_buf);
+                        if (res) {
+                                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "No cookie or valid cookie file specified, using default cookie\n");
+                                set_pref_ei_cookie("ClueCon");
+                        }
+                }
+        }
+
+        if (!prefs.nodename) {
+                set_pref_ei_nodename("freeswitch");
         }
 
         if (!prefs.nat_map) {
-                prefs.nat_map = 0;
-        }
-
-        if (prefs.nat_map) {
                 prefs.nat_map = 0;
         }
 
@@ -824,10 +562,56 @@ static int config(void)
         return 0;
 }
 
+static int read_cookie_from_file(char *filename) {
+        int fd;
+        char cookie[MAXATOMLEN+1];
+        char *end;
+        struct stat buf;
+        ssize_t res;
+
+        if (!stat(filename, &buf)) {
+                if ((buf.st_mode & S_IRWXG) || (buf.st_mode & S_IRWXO)) {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "%s must only be accessible by owner only.\n", filename);
+                        return 2;
+                }
+                if (buf.st_size > MAXATOMLEN) {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "%s contains a cookie larger than the maximum atom size of %d.\n", filename, MAXATOMLEN);
+                        return 2;
+                }
+                fd = open(filename, O_RDONLY);
+                if (fd < 1) {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Unable to open cookie file %s : %d.\n", filename, errno);
+                        return 2;
+                }
+
+                if ((res = read(fd, cookie, MAXATOMLEN)) < 1) {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Unable to read cookie file %s : %d.\n", filename, errno);
+                }
+
+                cookie[MAXATOMLEN] = '\0';
+
+                /* replace any end of line characters with a null */
+                if ((end = strchr(cookie, '\n'))) {
+                        *end = '\0';
+                }
+
+                if ((end = strchr(cookie, '\r'))) {
+                        *end = '\0';
+                }
+
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Read %d bytes from cookie file %s.\n", (int)res, filename);
+
+                set_pref_cookie(cookie);
+                return 0;
+        } else {
+                /* don't error here, because we might be blindly trying to read $HOME/.erlang.cookie, and that can fail silently */
+                return 1;
+        }
+}
 
 SWITCH_MODULE_LOAD_FUNCTION(mod_kazoo_load)
 {
-        switch_api_interface_t *api_interface;
+// FIX ME:        switch_api_interface_t *api_interface;
 
         memset(&globals, 0, sizeof(globals));
 
@@ -854,9 +638,9 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_kazoo_load)
         *module_interface = switch_loadable_module_create_module_interface(pool, modname);
 
         /* create an api for cli debug commands */
-        SWITCH_ADD_API(api_interface, "kazoo", "kazoo information", kazoo_api, "<command> [<args>]");
-// FIX ME:        SWITCH_ADD_API(api_interface, "kazoo_bind_logs", "kazoo information", kazoo_api, "<command> [<args>]");
-        switch_console_set_complete("add kazoo listeners");
+// FIX ME:        SWITCH_ADD_API(api_interface, "kazoo", "kazoo information", api_exec, "<command> [<args>]");
+// FIX ME:        SWITCH_ADD_API(api_interface, "kazoo_bind_logs", "kazoo information", api_exec, "<command> [<args>]");
+// FIX ME:        switch_console_set_complete("add kazoo listeners");
 
         /* indicate that the module should continue to be loaded */
         return SWITCH_STATUS_SUCCESS;
@@ -900,8 +684,6 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
         ErlConnect conn;
         int clientfd;
         int epmdfd;
-        uint32_t x = 0;
-        uint32_t errs = 0;
 
         if (switch_core_new_memory_pool(&pool) != SWITCH_STATUS_SUCCESS) {
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Out Of Memory: Oh My God! They killed Kenny! YOU BASTARDS!\n");
@@ -913,30 +695,35 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
         /* PART 1: Open our socket to the world so people can connect to us */
         while (!prefs.done) {
                 status = switch_sockaddr_info_get(&sa, prefs.ip, SWITCH_UNSPEC, prefs.port, 0, pool);
-                if (status)
-                        goto fail;
-                status = switch_socket_create(&listen_list.sock, switch_sockaddr_get_family(sa), SOCK_STREAM, SWITCH_PROTO_TCP, pool);
-                if (status)
-                        goto sock_fail;
-                status = switch_socket_opt_set(listen_list.sock, SWITCH_SO_REUSEADDR, 1);
-                if (status)
-                        goto sock_fail;
-                status = switch_socket_bind(listen_list.sock, sa);
-                if (status)
-                        goto sock_fail;
-                status = switch_socket_listen(listen_list.sock, 5);
-                if (status)
-                        goto sock_fail;
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Socket up listening on %s:%u\n", prefs.ip, prefs.port);
 
-                if (prefs.nat_map) {
-                        switch_nat_add_mapping(prefs.port, SWITCH_NAT_TCP, NULL, SWITCH_FALSE);
+                if (!status) {
+                        status = switch_socket_create(&listen_list.sock, switch_sockaddr_get_family(sa), SOCK_STREAM, SWITCH_PROTO_TCP, pool);
                 }
 
-                break;
-          sock_fail:
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Socket Error! Could not listen on %s:%u\n", prefs.ip, prefs.port);
-                switch_yield(100000);
+                if (!status && listen_list.sock) {
+                        status = switch_socket_opt_set(listen_list.sock, SWITCH_SO_REUSEADDR, 1);
+                }
+
+                if (!status && listen_list.sock) {
+                        status = switch_socket_bind(listen_list.sock, sa);
+                }
+
+                if (!status && listen_list.sock) {
+                        status = switch_socket_listen(listen_list.sock, 5);
+                }
+
+                if (!status && listen_list.sock) {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Erlang connection acceptor listenting on %s:%u\n", prefs.ip, prefs.port);
+
+                        if (prefs.nat_map) {
+                                switch_nat_add_mapping(prefs.port, SWITCH_NAT_TCP, NULL, SWITCH_FALSE);
+                        }
+
+                        break;
+                } else {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Erlang connection acceptor socket error, could not listen on %s:%u\n", prefs.ip, prefs.port);
+                        switch_yield(500000);
+                }
         }
 
         if (prefs.ei_compat_rel) {
@@ -946,20 +733,19 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
 
         /* try to initialize the erlang interface */
         if (SWITCH_STATUS_SUCCESS != initialise_ei(&ec, sa)) {
-                goto init_failed;
+                prefs.done = 1;
         }
 
         /* return value is -1 for error, a descriptor pointing to epmd otherwise */
         if ((epmdfd = ei_publish(&ec, prefs.port)) == -1) {
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR,
                                           "Failed to start epmd, is it in the freeswith user $PATH? Try starting it yourself or run an erl shell with the -sname or -name option.  Shutting down.\n");
-                goto init_failed;
+                prefs.done = 1;
         }
 
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Connected to epmd and published erlang cnode at %s\n", ec.thisnodename);
 
         listen_list.ready = 1;
-
 
         /* PART 2: Accept connections, negotiate cookies with other party, then spawn a new thread for each connection to us with it's own memory pool */
         /*   NOTE: Each thread is responsible for taking duplicated events and poping them from it's queue to the client, as well as handling requests for XML configs */
@@ -972,16 +758,15 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
 
                 if ((clientfd = ei_accept_tmo(&ec, (int) listen_list.sock, &conn, 500)) == ERL_ERROR) {
                         if (prefs.done) {
-                                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "Shutting Down\n");
+                                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "Erlang connection acceptor shutting down\n");
                                 break;
                         } else if (erl_errno == ETIMEDOUT) {
                                 continue;
                         } else if (errno) {
-                                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Socket Error %d %d\n", erl_errno, errno);
+                                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Erlang connection acceptor socket error %d %d\n", erl_errno, errno);
                         } else {
-                                /* if errno didn't get set, assume nothing *too* horrible occured */
                                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE,
-                                                                  "Someone tried to connect to us but there was an error in negotiation - probably bad cookie or bad nodename\n");
+                                                                  "Erlang node connection failed - probably bad cookie or bad nodename\n");
                         }
                         continue;
                 }
@@ -1015,7 +800,7 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
                 memcpy(listener->ec, ec, sizeof(ei_cnode));
 
                 switch_set_flag(listener, LFLAG_FULL);
-                switch_set_flag(listener, LFLAG_ALLOW_LOG);
+                switch_set_flag(listener, LFLAG_RUNNING);
 
                 switch_mutex_init(&listener->flag_mutex, SWITCH_MUTEX_NESTED, listener->pool);
 
@@ -1031,9 +816,9 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
                 launch_listener_thread(listener);
         }
 
-  end:
-
-        close_socket(&listen_list.sock);
+        if (listen_list.sock) {
+                close_socket(&listen_list.sock);
+        }
 
         /* Close the port we reserved for uPnP/Switch behind firewall, if necessary */
         if (prefs.nat_map && switch_nat_get_type()) {
@@ -1045,18 +830,12 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
                 switch_core_destroy_memory_pool(&pool);
         }
 
-        for (x = 0; x < prefs.acl_count; x++) {
+        for (uint32_t x = 0; x < prefs.acl_count; x++) {
                 switch_safe_free(prefs.acl[x]);
         }
 
-  fail:
         return SWITCH_STATUS_TERM;
 }
-
-
-
-
-
 
 switch_status_t initialise_ei(struct ei_cnode_s *ec, switch_sockaddr_t *sa)
 {
@@ -1066,18 +845,22 @@ switch_status_t initialise_ei(struct ei_cnode_s *ec, switch_sockaddr_t *sa)
         char thisnodename[MAXNODELEN + 1];
         char thisalivename[EI_MAXALIVELEN + 1];
         //EI_MAX_COOKIE_SIZE+1
-        char *ampersand;
+        char ipbuf[25];
+        const char *ip_addr;
+        char *atsign;
 
         /* copy the erlang interface nodename into something we can modify */
-        strncpy(thisalivename, prefs.ei_nodename, MAXNODELEN);
+        strncpy(thisalivename, prefs.ei_nodename, EI_MAXALIVELEN);
 
-        if ((ampersand = strchr(thisalivename, '@'))) {
+        ip_addr = switch_get_addr(ipbuf, sizeof(ipbuf), sa);
+
+        if ((atsign = strchr(thisalivename, '@'))) {
                 /* we got a qualified node name, don't guess the host/domain */
-                snprintf(thisnodename, MAXNODELEN + 1, "%s", prefs.nodename);
+                snprintf(thisnodename, MAXNODELEN + 1, "%s", prefs.ei_nodename);
                 /* truncate the alivename at the @ */
-                *ampersand = '\0';
+                *atsign = '\0';
         } else {
-                if ((nodehost = gethostbyaddr((const char *) &server_addr.sin_addr.s_addr, sizeof(server_addr.sin_addr.s_addr), AF_INET))) {
+                if ((nodehost = gethostbyaddr(ip_addr, sizeof(ip_addr), AF_INET))) {
                         memcpy(thishostname, nodehost->h_name, EI_MAXHOSTNAMELEN);
                 }
 
@@ -1105,7 +888,7 @@ switch_status_t initialise_ei(struct ei_cnode_s *ec, switch_sockaddr_t *sa)
         }
 
         /* init the ec stuff */
-        if (ei_connect_xinit(ec, thishostname, thisalivename, thisnodename, (Erl_IpAddr) (&server_addr.sin_addr.s_addr), prefs.ei_cookie, 0) < 0) {
+        if (ei_connect_xinit(ec, thishostname, thisalivename, thisnodename, (Erl_IpAddr)ip_addr, prefs.ei_cookie, 0) < 0) {
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Failed to initialize the erlang interface connection structure\n");
                 return SWITCH_STATUS_FALSE;
         }
