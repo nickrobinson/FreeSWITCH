@@ -40,6 +40,26 @@ struct erlang_process {
 	erlang_pid pid;
 };
 
+struct xml_fetch_msg {
+        switch_mutex_t *mutex;
+        switch_xml_t xml;
+        char uuid_str[SWITCH_UUID_FORMATTED_LENGTH + 1];
+        const char *section;
+        const char *tag_name;
+        const char *key_name;
+        const char *key_value;
+        switch_bool_t responded;
+};
+
+typedef struct xml_fetch_msg xml_fetch_msg_t;
+
+struct xml_msg_list {
+        xml_fetch_msg_t *xml_msg;
+        struct xml_msg_list *next;
+};
+
+typedef struct xml_msg_list xml_msg_list_t;
+
 struct listener {
         uint32_t id;
         int clientfd;
@@ -57,6 +77,7 @@ struct listener {
         int lost_logs;
         char remote_ip[50];
         char *peer_nodename;
+	xml_msg_list_t *xml_msgs;
         struct ei_cnode_s *ec;
         struct listener *next;
 };
@@ -77,6 +98,7 @@ struct prefs_s {
         switch_bool_t ei_shortname;
         int ei_compat_rel;
         erlang_encoding_t encoding;
+	switch_bool_t bind_to_logger;
 } prefs;
 
 typedef struct prefs_s prefs_t;
