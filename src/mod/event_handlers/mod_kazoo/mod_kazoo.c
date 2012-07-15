@@ -31,10 +31,10 @@
  *
  */
 #include <switch.h>
+#include <switch_apr.h>
 #include <ei.h>
 #include <resolv.h>
-#include <apr_network_io.h>
-
+#include <apr_portable.h>
 
 #define MAX_ACL 100
 #define CMD_BUFLEN 1024 * 1000
@@ -45,8 +45,6 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_kazoo_load);
 SWITCH_MODULE_SHUTDOWN_FUNCTION(mod_kazoo_shutdown);
 SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime);
 SWITCH_MODULE_DEFINITION(mod_kazoo, mod_kazoo_load, mod_kazoo_shutdown, mod_kazoo_runtime);
-
-static char *MARKER = "1";
 
 typedef enum {
         LFLAG_AUTHED = (1 << 0),
@@ -126,6 +124,7 @@ static struct {
         erlang_encoding_t encoding;
 } prefs;
 
+/*
 static struct {
         switch_mutex_t *mutex;
         switch_xml_t xml;
@@ -135,15 +134,16 @@ static struct {
         char *key_value;
         switch_bool_t responded;
 } xml_fetch_msg;
+*/
 
-static uint32_t next_id(void)
+/*static uint32_t next_id(void)
 {
         uint32_t id;
         switch_mutex_lock(globals.listener_mutex);
         id = ++prefs.id;
         switch_mutex_unlock(globals.listener_mutex);
         return id;
-}
+}*/
 
 SWITCH_DECLARE_GLOBAL_STRING_FUNC(set_pref_ip, prefs.ip);
 SWITCH_DECLARE_GLOBAL_STRING_FUNC(set_pref_ei_cookie, prefs.ei_cookie);
@@ -369,7 +369,7 @@ static void kill_all_listeners(void)
         switch_mutex_unlock(globals.listener_mutex);
 }
 
-
+/*
 static listener_t *find_listener(uint32_t id)
 {
         listener_t *l, *r = NULL;
@@ -386,6 +386,7 @@ static listener_t *find_listener(uint32_t id)
         switch_mutex_unlock(globals.listener_mutex);
         return r;
 }
+*/
 
 static void close_socket(switch_socket_t ** sock)
 {
@@ -755,6 +756,7 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
         listener_t *listener;
         struct ei_cnode_s ec; /* erlang c node interface connection */
         ErlConnect conn;
+		apr_os_sock_t sockfd;
         int clientfd;
         int epmdfd;
 
@@ -829,7 +831,9 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
                  * mismatch or a godzilla attack (and a godzilla attack is highly likely) */
                 errno = 0;
 
-                if ((clientfd = ei_accept_tmo(&ec, listen_list.sock->socketdes, &conn, 500)) == ERL_ERROR) {
+				apr_os_sock_get((apr_os_sock_t *) &sockfd, (apr_socket_t *) listen_list.sock);
+
+                if ((clientfd = ei_accept_tmo(&ec, (int) sockfd, &conn, 498)) == ERL_ERROR) {
                         if (prefs.done) {
                                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "Erlang connection acceptor shutting down\n");
                                 break;
