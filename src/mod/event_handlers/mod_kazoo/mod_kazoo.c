@@ -32,6 +32,9 @@
  */
 #include <switch.h>
 #include <ei.h>
+#include <resolv.h>
+#include <apr_network_io.h>
+
 
 #define MAX_ACL 100
 #define CMD_BUFLEN 1024 * 1000
@@ -125,7 +128,7 @@ static struct {
 
 static struct {
         switch_mutex_t *mutex;
-        switch_xml_t xml = NULL;
+        switch_xml_t xml;
         char uuid_str[SWITCH_UUID_FORMATTED_LENGTH + 1];
         char *section;
         char *tag_name;
@@ -187,7 +190,7 @@ static switch_status_t log_handler(const switch_log_node_t *node, switch_log_lev
 }
 
 // This will be removed, this is for reference
-static switch_status_t expire_listener(listener_t ** listener)
+/*static switch_status_t expire_listener(listener_t ** listener)
 {
         listener_t *l;
 
@@ -228,13 +231,13 @@ static switch_status_t expire_listener(listener_t ** listener)
 
         *listener = NULL;
         return SWITCH_STATUS_SUCCESS;
-}
+}*/
 
 static void event_handler(switch_event_t *event)
 {
         switch_event_t *clone = NULL;
         listener_t *l, *lp, *last = NULL;
-        time_t now = switch_epoch_time_now(NULL);
+// DELETE:        time_t now = switch_epoch_time_now(NULL);
 
         switch_assert(event != NULL);
 
@@ -347,11 +350,12 @@ static void remove_listener(listener_t *listener)
 static void kill_listener(listener_t *l)
 {
         switch_clear_flag(l, LFLAG_RUNNING);
+/* FIX ME:
         if (l->sock) {
                 switch_socket_shutdown(l->sock, SWITCH_SHUTDOWN_READWRITE);
                 switch_socket_close(l->sock);
         }
-
+*/
 }
 
 static void kill_all_listeners(void)
@@ -429,7 +433,7 @@ static void *SWITCH_THREAD_FUNC listener_run(switch_thread_t *thread, void *obj)
         if (listener->clientfd) {
               shutdown(listener->clientfd, SHUT_RDWR);
               close(listener->clientfd);
-              listener->clientfd = NULL;
+              listener->clientfd = 0;
         }
 
         switch_thread_rwlock_unlock(listener->rwlock);
@@ -443,9 +447,9 @@ static void *SWITCH_THREAD_FUNC listener_run(switch_thread_t *thread, void *obj)
         if (listener->session) {
                 switch_channel_clear_flag(switch_core_session_get_channel(listener->session), CF_CONTROLLED);
                 switch_clear_flag_locked(listener, LFLAG_SESSION);
-                if (locked) {
+/*                if (locked) {
                         switch_core_session_rwunlock(listener->session);
-                }
+                }*/
         }
 
         if (listener->pool) {
@@ -470,6 +474,53 @@ static void launch_listener_thread(listener_t *listener)
         switch_threadattr_detach_set(thd_attr, 1);
         switch_threadattr_stacksize_set(thd_attr, SWITCH_THREAD_STACKSIZE);
         switch_thread_create(&thread, thd_attr, listener_run, listener, listener->pool);
+}
+
+static int read_cookie_from_file(char *filename) {
+        int fd;
+        char cookie[MAXATOMLEN+1];
+        char *end;
+        struct stat buf;
+        ssize_t res;
+
+        if (!stat(filename, &buf)) {
+                if ((buf.st_mode & S_IRWXG) || (buf.st_mode & S_IRWXO)) {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "%s must only be accessible by owner only.\n", filename);
+                        return 2;
+                }
+                if (buf.st_size > MAXATOMLEN) {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "%s contains a cookie larger than the maximum atom size of %d.\n", filename, MAXATOMLEN);
+                        return 2;
+                }
+                fd = open(filename, O_RDONLY);
+                if (fd < 1) {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Unable to open cookie file %s : %d.\n", filename, errno);
+                        return 2;
+                }
+
+                if ((res = read(fd, cookie, MAXATOMLEN)) < 1) {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Unable to read cookie file %s : %d.\n", filename, errno);
+                }
+
+                cookie[MAXATOMLEN] = '\0';
+
+                /* replace any end of line characters with a null */
+                if ((end = strchr(cookie, '\n'))) {
+                        *end = '\0';
+                }
+
+                if ((end = strchr(cookie, '\r'))) {
+                        *end = '\0';
+                }
+
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Read %d bytes from cookie file %s.\n", (int)res, filename);
+
+                set_pref_ei_cookie(cookie);
+                return 0;
+        } else {
+                /* don't error here, because we might be blindly trying to read $HOME/.erlang.cookie, and that can fail silently */
+                return 1;
+        }
 }
 
 static int config(void)
@@ -498,9 +549,9 @@ static int config(void)
                                                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Unable to read cookie from %s\n", val);
                                         }
                                 } else if (!strcmp(var, "nodename")) {
-                                        set_pref_ei_nodname(val);
+                                        set_pref_ei_nodename(val);
                                 } else if (!strcmp(var, "shortname")) {
-                                        set_pref_ei_shortname(val);
+                                        prefs.ei_shortname = switch_true(val);
                                 } else if (!strcmp(var, "compat-rel")) {
                                         if (atoi(val) >= 7)
                                                 prefs.ei_compat_rel = atoi(val);
@@ -558,7 +609,7 @@ static int config(void)
                 }
         }
 
-        if (!prefs.nodename) {
+        if (!prefs.ei_nodename) {
                 set_pref_ei_nodename("freeswitch");
         }
 
@@ -573,284 +624,9 @@ static int config(void)
         return 0;
 }
 
-static int read_cookie_from_file(char *filename) {
-        int fd;
-        char cookie[MAXATOMLEN+1];
-        char *end;
-        struct stat buf;
-        ssize_t res;
-
-        if (!stat(filename, &buf)) {
-                if ((buf.st_mode & S_IRWXG) || (buf.st_mode & S_IRWXO)) {
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "%s must only be accessible by owner only.\n", filename);
-                        return 2;
-                }
-                if (buf.st_size > MAXATOMLEN) {
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "%s contains a cookie larger than the maximum atom size of %d.\n", filename, MAXATOMLEN);
-                        return 2;
-                }
-                fd = open(filename, O_RDONLY);
-                if (fd < 1) {
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Unable to open cookie file %s : %d.\n", filename, errno);
-                        return 2;
-                }
-
-                if ((res = read(fd, cookie, MAXATOMLEN)) < 1) {
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Unable to read cookie file %s : %d.\n", filename, errno);
-                }
-
-                cookie[MAXATOMLEN] = '\0';
-
-                /* replace any end of line characters with a null */
-                if ((end = strchr(cookie, '\n'))) {
-                        *end = '\0';
-                }
-
-                if ((end = strchr(cookie, '\r'))) {
-                        *end = '\0';
-                }
-
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Read %d bytes from cookie file %s.\n", (int)res, filename);
-
-                set_pref_cookie(cookie);
-                return 0;
-        } else {
-                /* don't error here, because we might be blindly trying to read $HOME/.erlang.cookie, and that can fail silently */
-                return 1;
-        }
-}
-
-SWITCH_MODULE_LOAD_FUNCTION(mod_kazoo_load)
+switch_status_t initialize_ei(struct ei_cnode_s *ec, switch_sockaddr_t *sa)
 {
-// FIX ME:        switch_api_interface_t *api_interface;
-
-        memset(&globals, 0, sizeof(globals));
-
-        /* initialize the listener mutex */
-        switch_mutex_init(&globals.listener_mutex, SWITCH_MUTEX_NESTED, pool);
-
-        /* initialize listen_list */
-        memset(&listen_list, 0, sizeof(listen_list));
-        switch_mutex_init(&listen_list.sock_mutex, SWITCH_MUTEX_NESTED, pool);
-
-        /* bind to all switch events */
-        if (switch_event_bind_removable(modname, SWITCH_EVENT_ALL, SWITCH_EVENT_SUBCLASS_ANY, event_handler, NULL, &globals.node) != SWITCH_STATUS_SUCCESS) {
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Couldn't bind!\n");
-                return SWITCH_STATUS_GENERR;
-        }
-
-        /* bind to all logs */
-        if (prefs.bind_to_logger) {
-		// FIX ME: Move to function
-              switch_log_bind_logger(log_handler, SWITCH_LOG_DEBUG, SWITCH_FALSE);
-        }
-
-        /* connect my internal structure to the blank pointer passed to me */
-        *module_interface = switch_loadable_module_create_module_interface(pool, modname);
-
-        /* create an api for cli debug commands */
-// FIX ME:        SWITCH_ADD_API(api_interface, "kazoo", "kazoo information", api_exec, "<command> [<args>]");
-// FIX ME:        SWITCH_ADD_API(api_interface, "kazoo_bind_logs", "kazoo information", api_exec, "<command> [<args>]");
-// FIX ME:        switch_console_set_complete("add kazoo listeners");
-
-        /* indicate that the module should continue to be loaded */
-        return SWITCH_STATUS_SUCCESS;
-}
-
-SWITCH_MODULE_SHUTDOWN_FUNCTION(mod_kazoo_shutdown)
-{
-        int sanity = 0;
-
-        prefs.done = 1;
-
-        kill_all_listeners();
-        switch_log_unbind_logger(log_handler);
-
-        close_socket(&listen_list.sock);
-
-        while (prefs.threads) {
-                switch_yield(100000);
-                kill_all_listeners();
-                if (++sanity >= 200) {
-                        break;
-                }
-        }
-
-        switch_event_unbind(&globals.node);
-
-        switch_safe_free(prefs.ip);
-        switch_safe_free(prefs.ei_cookie);
-
-        return SWITCH_STATUS_SUCCESS;
-}
-
-SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
-{
-        switch_memory_pool_t *pool = NULL, *listener_pool = NULL;
-        switch_status_t status;
-        switch_sockaddr_t *sa;
-        switch_socket_t *inbound_socket = NULL;
-        listener_t *listener;
-        struct ei_cnode_s ec; /* erlang c node interface connection */
-        ErlConnect conn;
-        int clientfd;
-        int epmdfd;
-
-        if (switch_core_new_memory_pool(&pool) != SWITCH_STATUS_SUCCESS) {
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Out Of Memory: Oh My God! They killed Kenny! YOU BASTARDS!\n");
-                return SWITCH_STATUS_TERM;
-        }
-
-        config();
-
-        /* PART 1: Open our socket to the world so people can connect to us */
-        while (!prefs.done) {
-                status = switch_sockaddr_info_get(&sa, prefs.ip, SWITCH_UNSPEC, prefs.port, 0, pool);
-
-                if (!status) {
-                        status = switch_socket_create(&listen_list.sock, switch_sockaddr_get_family(sa), SOCK_STREAM, SWITCH_PROTO_TCP, pool);
-                }
-
-                if (!status && listen_list.sock) {
-                        status = switch_socket_opt_set(listen_list.sock, SWITCH_SO_REUSEADDR, 1);
-                }
-
-                if (!status && listen_list.sock) {
-                        status = switch_socket_bind(listen_list.sock, sa);
-                }
-
-                if (!status && listen_list.sock) {
-                        status = switch_socket_listen(listen_list.sock, 5);
-                }
-
-                if (!status && listen_list.sock) {
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Erlang connection acceptor listenting on %s:%u\n", prefs.ip, prefs.port);
-
-                        if (prefs.nat_map) {
-                                switch_nat_add_mapping(prefs.port, SWITCH_NAT_TCP, NULL, SWITCH_FALSE);
-                        }
-
-                        break;
-                } else {
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Erlang connection acceptor socket error, could not listen on %s:%u\n", prefs.ip, prefs.port);
-                        switch_yield(500000);
-                }
-        }
-
-        if (prefs.ei_compat_rel) {
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Compatability with OTP R%d requested\n", prefs.ei_compat_rel);
-                ei_set_compat_rel(prefs.ei_compat_rel);
-        }
-
-        /* try to initialize the erlang interface */
-        if (SWITCH_STATUS_SUCCESS != initialise_ei(&ec, sa)) {
-                prefs.done = 1;
-        }
-
-        /* return value is -1 for error, a descriptor pointing to epmd otherwise */
-        if ((epmdfd = ei_publish(&ec, prefs.port)) == -1) {
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR,
-                                          "Failed to start epmd, is it in the freeswith user $PATH? Try starting it yourself or run an erl shell with the -sname or -name option.  Shutting down.\n");
-                prefs.done = 1;
-        }
-
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Connected to epmd and published erlang cnode at %s\n", ec.thisnodename);
-
-        listen_list.ready = 1;
-
-        /* PART 2: Accept connections, negotiate cookies with other party, then spawn a new thread for each connection to us with it's own memory pool */
-        /*   NOTE: Each thread is responsible for taking duplicated events and poping them from it's queue to the client, as well as handling requests for XML configs */
-        /*         in addition to inbound messages from Erlang */
-        while (!prefs.done) {
-                /* zero out errno because ei_accept doesn't differentiate between a
-                 * failed authentication or a socket failure, or a client version
-                 * mismatch or a godzilla attack (and a godzilla attack is highly likely) */
-                errno = 0;
-
-                if ((clientfd = ei_accept_tmo(&ec, (int) listen_list.sock, &conn, 500)) == ERL_ERROR) {
-                        if (prefs.done) {
-                                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "Erlang connection acceptor shutting down\n");
-                                break;
-                        } else if (erl_errno == ETIMEDOUT) {
-                                continue;
-                        } else if (errno) {
-                                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Erlang connection acceptor socket error %d %d\n", erl_errno, errno);
-                        } else {
-                                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE,
-                                                                  "Erlang node connection failed - probably bad cookie or bad nodename\n");
-                        }
-                        continue;
-                }
-
-                /* Create memory pool for this listener thread */
-                if (switch_core_new_memory_pool(&listener_pool) != SWITCH_STATUS_SUCCESS) {
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Out of memory: Too bad drinking scotch isn't a paying job or Kenny's dad would be a millionare!\n");
-                        break;
-                }
-
-                /* From the listener's memory pool, allocate some memory for the listener's own structure */
-                if (!(listener = switch_core_alloc(listener_pool, sizeof(*listener)))) {
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Memory Error\n");
-                        break;
-                }
-
-                /* paranoid and unnecessary clean up of our allocation */
-                memset(listener, 0, sizeof(*listener));
-
-                /* Create a mutex and some queues for the work we will be doing to process events */
-                switch_thread_rwlock_create(&listener->rwlock, listener_pool);
-                switch_queue_create(&listener->event_queue, MAX_QUEUE_LEN, listener_pool);
-                switch_queue_create(&listener->log_queue, MAX_QUEUE_LEN, listener_pool);
-
-                listener->clientfd = clientfd;
-
-                listener->pool = listener_pool;
-                listener_pool = NULL;
-
-                listener->ec = switch_core_alloc(listener->pool, sizeof(ei_cnode));
-                memcpy(listener->ec, ec, sizeof(ei_cnode));
-
-                switch_set_flag(listener, LFLAG_FULL);
-                switch_set_flag(listener, LFLAG_RUNNING);
-
-                switch_mutex_init(&listener->flag_mutex, SWITCH_MUTEX_NESTED, listener->pool);
-
-                switch_core_hash_init(&listener->event_hash, listener->pool);
-
-                /* store the IP and node name we are talking with */
-                switch_inet_ntop(AF_INET, conn.ipadr, listener->remote_ip, sizeof(listener->remote_ip));
-                listener->peer_nodename = switch_core_strdup(listener->pool, conn.nodename);
-
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "New erlang connection from node(%s) %s\n", listener->remote_ip, listener->peer_nodename);
-
-                /* Go do some real work - start the thread for this erlang listener connection! */
-                launch_listener_thread(listener);
-        }
-
-        if (listen_list.sock) {
-                close_socket(&listen_list.sock);
-        }
-
-        /* Close the port we reserved for uPnP/Switch behind firewall, if necessary */
-        if (prefs.nat_map && switch_nat_get_type()) {
-                switch_nat_del_mapping(prefs.port, SWITCH_NAT_TCP);
-        }
-
-        /* Free our memory pool for handling sockets */
-        if (pool) {
-                switch_core_destroy_memory_pool(&pool);
-        }
-
-        for (uint32_t x = 0; x < prefs.acl_count; x++) {
-                switch_safe_free(prefs.acl[x]);
-        }
-
-        return SWITCH_STATUS_TERM;
-}
-
-switch_status_t initialise_ei(struct ei_cnode_s *ec, switch_sockaddr_t *sa)
-{
-        switch_status_t rv;
+//        switch_status_t rv;
         struct hostent *nodehost;
         char thishostname[EI_MAXHOSTNAMELEN + 1] = "";
         char thisnodename[MAXNODELEN + 1];
@@ -906,6 +682,234 @@ switch_status_t initialise_ei(struct ei_cnode_s *ec, switch_sockaddr_t *sa)
 
         return SWITCH_STATUS_SUCCESS;
 }
+SWITCH_MODULE_LOAD_FUNCTION(mod_kazoo_load)
+{
+// FIX ME:        switch_api_interface_t *api_interface;
+
+        memset(&globals, 0, sizeof(globals));
+
+        /* initialize the listener mutex */
+        switch_mutex_init(&globals.listener_mutex, SWITCH_MUTEX_NESTED, pool);
+
+        /* initialize listen_list */
+        memset(&listen_list, 0, sizeof(listen_list));
+        switch_mutex_init(&listen_list.sock_mutex, SWITCH_MUTEX_NESTED, pool);
+
+        /* bind to all switch events */
+        if (switch_event_bind_removable(modname, SWITCH_EVENT_ALL, SWITCH_EVENT_SUBCLASS_ANY, event_handler, NULL, &globals.node) != SWITCH_STATUS_SUCCESS) {
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Couldn't bind!\n");
+                return SWITCH_STATUS_GENERR;
+        }
+
+        /* bind to all logs */
+// FIXME: Invent this feature!!!        if (prefs.bind_to_logger) {
+		// FIX ME: Move to function
+              switch_log_bind_logger(log_handler, SWITCH_LOG_DEBUG, SWITCH_FALSE);
+//        }
+
+        /* connect my internal structure to the blank pointer passed to me */
+        *module_interface = switch_loadable_module_create_module_interface(pool, modname);
+
+        /* create an api for cli debug commands */
+// FIX ME:        SWITCH_ADD_API(api_interface, "kazoo", "kazoo information", api_exec, "<command> [<args>]");
+// FIX ME:        SWITCH_ADD_API(api_interface, "kazoo_bind_logs", "kazoo information", api_exec, "<command> [<args>]");
+// FIX ME:        switch_console_set_complete("add kazoo listeners");
+
+        /* indicate that the module should continue to be loaded */
+        return SWITCH_STATUS_SUCCESS;
+}
+
+SWITCH_MODULE_SHUTDOWN_FUNCTION(mod_kazoo_shutdown)
+{
+        int sanity = 0;
+
+        prefs.done = 1;
+
+        kill_all_listeners();
+        switch_log_unbind_logger(log_handler);
+
+        close_socket(&listen_list.sock);
+
+        while (prefs.threads) {
+                switch_yield(100000);
+                kill_all_listeners();
+                if (++sanity >= 200) {
+                        break;
+                }
+        }
+
+        switch_event_unbind(&globals.node);
+
+        switch_safe_free(prefs.ip);
+        switch_safe_free(prefs.ei_cookie);
+
+        return SWITCH_STATUS_SUCCESS;
+}
+
+SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
+{
+        switch_memory_pool_t *pool = NULL, *listener_pool = NULL;
+        switch_status_t status;
+        switch_sockaddr_t *sa;
+//        switch_socket_t *inbound_socket = NULL;
+        listener_t *listener;
+        struct ei_cnode_s ec; /* erlang c node interface connection */
+        ErlConnect conn;
+        int clientfd;
+        int epmdfd;
+
+        if (switch_core_new_memory_pool(&pool) != SWITCH_STATUS_SUCCESS) {
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Out Of Memory: Oh My God! They killed Kenny! YOU BASTARDS!\n");
+                return SWITCH_STATUS_TERM;
+        }
+
+        config();
+
+        /* PART 1: Open our socket to the world so people can connect to us */
+        while (!prefs.done) {
+                status = switch_sockaddr_info_get(&sa, prefs.ip, SWITCH_UNSPEC, prefs.port, 0, pool);
+
+                if (!status) {
+                        status = switch_socket_create(&listen_list.sock, switch_sockaddr_get_family(sa), SOCK_STREAM, SWITCH_PROTO_TCP, pool);
+                }
+
+                if (!status && listen_list.sock) {
+                        status = switch_socket_opt_set(listen_list.sock, SWITCH_SO_REUSEADDR, 1);
+                }
+
+                if (!status && listen_list.sock) {
+                        status = switch_socket_bind(listen_list.sock, sa);
+                }
+
+                if (!status && listen_list.sock) {
+                        status = switch_socket_listen(listen_list.sock, 5);
+                }
+
+                if (!status && listen_list.sock) {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Erlang connection acceptor listenting on %s:%u\n", prefs.ip, prefs.port);
+
+                        if (prefs.nat_map) {
+                                switch_nat_add_mapping(prefs.port, SWITCH_NAT_TCP, NULL, SWITCH_FALSE);
+                        }
+
+                        break;
+                } else {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Erlang connection acceptor socket error, could not listen on %s:%u\n", prefs.ip, prefs.port);
+                        switch_yield(500000);
+                }
+        }
+
+        if (prefs.ei_compat_rel) {
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Compatability with OTP R%d requested\n", prefs.ei_compat_rel);
+                ei_set_compat_rel(prefs.ei_compat_rel);
+        }
+
+        /* try to initialize the erlang interface */
+        if (SWITCH_STATUS_SUCCESS != initialize_ei(&ec, sa)) {
+                prefs.done = 1;
+        }
+
+        /* return value is -1 for error, a descriptor pointing to epmd otherwise */
+        if ((epmdfd = ei_publish(&ec, prefs.port)) == -1) {
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR,
+                                          "Failed to start epmd, is it in the freeswith user $PATH? Try starting it yourself or run an erl shell with the -sname or -name option.  Shutting down.\n");
+                prefs.done = 1;
+        }
+
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Connected to epmd and published erlang cnode at %s\n", ec.thisnodename);
+
+        listen_list.ready = 1;
+
+        /* PART 2: Accept connections, negotiate cookies with other party, then spawn a new thread for each connection to us with it's own memory pool */
+        /*   NOTE: Each thread is responsible for taking duplicated events and poping them from it's queue to the client, as well as handling requests for XML configs */
+        /*         in addition to inbound messages from Erlang */
+        while (!prefs.done) {
+                /* zero out errno because ei_accept doesn't differentiate between a
+                 * failed authentication or a socket failure, or a client version
+                 * mismatch or a godzilla attack (and a godzilla attack is highly likely) */
+                errno = 0;
+
+                if ((clientfd = ei_accept_tmo(&ec, listen_list.sock->socketdes, &conn, 500)) == ERL_ERROR) {
+                        if (prefs.done) {
+                                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "Erlang connection acceptor shutting down\n");
+                                break;
+                        } else if (erl_errno == ETIMEDOUT) {
+                                continue;
+                        } else if (errno) {
+                                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Erlang connection acceptor socket error %d %d\n", erl_errno, errno);
+                        } else {
+                                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE,
+                                                                  "Erlang node connection failed - probably bad cookie or bad nodename\n");
+                        }
+                        continue;
+                }
+
+                /* Create memory pool for this listener thread */
+                if (switch_core_new_memory_pool(&listener_pool) != SWITCH_STATUS_SUCCESS) {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Out of memory: Too bad drinking scotch isn't a paying job or Kenny's dad would be a millionare!\n");
+                        break;
+                }
+
+                /* From the listener's memory pool, allocate some memory for the listener's own structure */
+                if (!(listener = switch_core_alloc(listener_pool, sizeof(*listener)))) {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Memory Error\n");
+                        break;
+                }
+
+                /* paranoid and unnecessary clean up of our allocation */
+                memset(listener, 0, sizeof(*listener));
+
+                /* Create a mutex and some queues for the work we will be doing to process events */
+                switch_thread_rwlock_create(&listener->rwlock, listener_pool);
+                switch_queue_create(&listener->event_queue, MAX_QUEUE_LEN, listener_pool);
+                switch_queue_create(&listener->log_queue, MAX_QUEUE_LEN, listener_pool);
+
+                listener->clientfd = clientfd;
+
+                listener->pool = listener_pool;
+                listener_pool = NULL;
+
+                listener->ec = switch_core_alloc(listener->pool, sizeof(ei_cnode));
+                memcpy(listener->ec, &ec, sizeof(ei_cnode));
+
+                switch_set_flag(listener, LFLAG_FULL);
+                switch_set_flag(listener, LFLAG_RUNNING);
+
+                switch_mutex_init(&listener->flag_mutex, SWITCH_MUTEX_NESTED, listener->pool);
+
+                switch_core_hash_init(&listener->event_hash, listener->pool);
+
+                /* store the IP and node name we are talking with */
+                switch_inet_ntop(AF_INET, conn.ipadr, listener->remote_ip, sizeof(listener->remote_ip));
+                listener->peer_nodename = switch_core_strdup(listener->pool, conn.nodename);
+
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "New erlang connection from node(%s) %s\n", listener->remote_ip, listener->peer_nodename);
+
+                /* Go do some real work - start the thread for this erlang listener connection! */
+                launch_listener_thread(listener);
+        }
+
+        if (listen_list.sock) {
+                close_socket(&listen_list.sock);
+        }
+
+        /* Close the port we reserved for uPnP/Switch behind firewall, if necessary */
+        if (prefs.nat_map && switch_nat_get_type()) {
+                switch_nat_del_mapping(prefs.port, SWITCH_NAT_TCP);
+        }
+
+        /* Free our memory pool for handling sockets */
+        if (pool) {
+                switch_core_destroy_memory_pool(&pool);
+        }
+
+        for (uint32_t x = 0; x < prefs.acl_count; x++) {
+                switch_safe_free(prefs.acl[x]);
+        }
+
+        return SWITCH_STATUS_TERM;
+}
+
 
 /* For Emacs:
  * Local Variables:
