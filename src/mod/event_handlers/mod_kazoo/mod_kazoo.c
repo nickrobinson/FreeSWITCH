@@ -123,6 +123,16 @@ static struct {
         erlang_encoding_t encoding;
 } prefs;
 
+static struct {
+        switch_mutex_t *mutex;
+        switch_xml_t xml = NULL;
+        char uuid_str[SWITCH_UUID_FORMATTED_LENGTH + 1];
+        char *section;
+        char *tag_name;
+        char *key_value;
+        switch_bool_t responded;
+} xml_fetch_msg;
+
 static uint32_t next_id(void)
 {
         uint32_t id;
