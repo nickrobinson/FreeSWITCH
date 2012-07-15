@@ -23,7 +23,8 @@
  *
  * Contributor(s):
  *
- * Anthony Minessale II <anthm@freeswitch.org>
+ * Karl Anderson <karl@2600hz.com>
+ * Darren Schreiber <darren@2600hz.com>
  *
  *
  * mod_kazoo.c -- Socket Controlled Event Handler
@@ -31,9 +32,11 @@
  */
 #include <switch.h>
 #include <ei.h>
+
 #define CMD_BUFLEN 1024 * 1000
 #define MAX_QUEUE_LEN 25000
 #define MAX_MISSED 500
+
 SWITCH_MODULE_LOAD_FUNCTION(mod_kazoo_load);
 SWITCH_MODULE_SHUTDOWN_FUNCTION(mod_kazoo_shutdown);
 SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime);
@@ -190,6 +193,8 @@ static void flush_listener(listener_t *listener, switch_bool_t flush_log, switch
         }
 }
 
+
+// This will be removed, this is for reference
 static switch_status_t expire_listener(listener_t ** listener)
 {
         listener_t *l;
@@ -819,6 +824,7 @@ static int config(void)
         return 0;
 }
 
+
 SWITCH_MODULE_LOAD_FUNCTION(mod_kazoo_load)
 {
         switch_api_interface_t *api_interface;
@@ -839,13 +845,17 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_kazoo_load)
         }
 
         /* bind to all logs */
-        switch_log_bind_logger(log_handler, SWITCH_LOG_DEBUG, SWITCH_FALSE);
+        if (prefs.bind_to_logger) {
+		// FIX ME: Move to function
+              switch_log_bind_logger(log_handler, SWITCH_LOG_DEBUG, SWITCH_FALSE);
+        }
 
         /* connect my internal structure to the blank pointer passed to me */
         *module_interface = switch_loadable_module_create_module_interface(pool, modname);
 
         /* create an api for cli debug commands */
         SWITCH_ADD_API(api_interface, "kazoo", "kazoo information", kazoo_api, "<command> [<args>]");
+// FIX ME:        SWITCH_ADD_API(api_interface, "kazoo_bind_logs", "kazoo information", kazoo_api, "<command> [<args>]");
         switch_console_set_complete("add kazoo listeners");
 
         /* indicate that the module should continue to be loaded */
@@ -894,12 +904,13 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
         uint32_t errs = 0;
 
         if (switch_core_new_memory_pool(&pool) != SWITCH_STATUS_SUCCESS) {
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "OH OH no pool\n");
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Out Of Memory: Oh My God! They killed Kenny! YOU BASTARDS!\n");
                 return SWITCH_STATUS_TERM;
         }
 
         config();
 
+        /* PART 1: Open our socket to the world so people can connect to us */
         while (!prefs.done) {
                 status = switch_sockaddr_info_get(&sa, prefs.ip, SWITCH_UNSPEC, prefs.port, 0, pool);
                 if (status)
@@ -940,27 +951,23 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
 
         /* return value is -1 for error, a descriptor pointing to epmd otherwise */
         if ((epmdfd = ei_publish(&ec, prefs.port)) == -1) {
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Failed to publish port to empd, trying to start via system()\n");
-                if (system("epmd -daemon")) {
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR,
-                                                          "Failed to start empd, is it in the freeswith user $PATH? Try starting it yourself or run an erl shell with the -sname or -name option.  Shutting down.\n");
-                        goto init_failed;
-                }
-                switch_yield(100000);
-                if ((epmdfd = ei_publish(&ec, prefs.port)) == -1) {
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Failed to publish port to empd after ensuring it was running.  Shutting down.\n");
-                        goto init_failed;
-                }
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR,
+                                          "Failed to start epmd, is it in the freeswith user $PATH? Try starting it yourself or run an erl shell with the -sname or -name option.  Shutting down.\n");
+                goto init_failed;
         }
 
         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Connected to epmd and published erlang cnode at %s\n", ec.thisnodename);
 
         listen_list.ready = 1;
 
+
+        /* PART 2: Accept connections, negotiate cookies with other party, then spawn a new thread for each connection to us with it's own memory pool */
+        /*   NOTE: Each thread is responsible for taking duplicated events and poping them from it's queue to the client, as well as handling requests for XML configs */
+        /*         in addition to inbound messages from Erlang */
         while (!prefs.done) {
                 /* zero out errno because ei_accept doesn't differentiate between a
                  * failed authentication or a socket failure, or a client version
-                 * mismatch or a godzilla attack */
+                 * mismatch or a godzilla attack (and a godzilla attack is highly likely) */
                 errno = 0;
 
                 if ((clientfd = ei_accept_tmo(&ec, (int) listen_list.sock, &conn, 500)) == ERL_ERROR) {
@@ -974,16 +981,18 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
                         } else {
                                 /* if errno didn't get set, assume nothing *too* horrible occured */
                                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE,
-                                                                  "Ignorable error in ei_accept - probable bad client version, bad cookie or bad nodename\n");
+                                                                  "Someone tried to connect to us but there was an error in negotiation - probably bad cookie or bad nodename\n");
                         }
                         continue;
                 }
 
+                /* Create memory pool for this listener thread */
                 if (switch_core_new_memory_pool(&listener_pool) != SWITCH_STATUS_SUCCESS) {
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "OH OH no pool\n");
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Out of memory: Too bad drinking scotch isn't a paying job or Kenny's dad would be a millionare!\n");
                         break;
                 }
 
+                /* From the listener's memory pool, allocate some memory for the listener's own structure */
                 if (!(listener = switch_core_alloc(listener_pool, sizeof(*listener)))) {
                         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Memory Error\n");
                         break;
@@ -992,6 +1001,7 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
                 /* paranoid and unnecessary clean up of our allocation */
                 memset(listener, 0, sizeof(*listener));
 
+                /* Create a mutex and some queues for the work we will be doing to process events */
                 switch_thread_rwlock_create(&listener->rwlock, listener_pool);
                 switch_queue_create(&listener->event_queue, MAX_QUEUE_LEN, listener_pool);
                 switch_queue_create(&listener->log_queue, MAX_QUEUE_LEN, listener_pool);
@@ -1017,6 +1027,7 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
 
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "New erlang connection from node(%s) %s\n", listener->remote_ip, listener->peer_nodename);
 
+                /* Go do some real work - start the thread for this erlang listener connection! */
                 launch_listener_thread(listener);
         }
 
@@ -1024,18 +1035,15 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
 
         close_socket(&listen_list.sock);
 
+        /* Close the port we reserved for uPnP/Switch behind firewall, if necessary */
         if (prefs.nat_map && switch_nat_get_type()) {
                 switch_nat_del_mapping(prefs.port, SWITCH_NAT_TCP);
         }
 
+        /* Free our memory pool for handling sockets */
         if (pool) {
                 switch_core_destroy_memory_pool(&pool);
         }
-
-        if (listener_pool) {
-                switch_core_destroy_memory_pool(&listener_pool);
-        }
-
 
         for (x = 0; x < prefs.acl_count; x++) {
                 switch_safe_free(prefs.acl[x]);
