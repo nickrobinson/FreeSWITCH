@@ -71,6 +71,27 @@ typedef enum {
         ERLANG_BINARY
 } erlang_encoding_t;
 
+struct xml_fetch_msg {
+        switch_mutex_t *mutex;
+        switch_xml_t xml;
+        char uuid_str[SWITCH_UUID_FORMATTED_LENGTH + 1];
+        const char *section;
+        const char *tag_name;
+        const char *key_name;
+        const char *key_value;
+        switch_bool_t responded;
+};
+
+typedef struct xml_fetch_msg xml_fetch_msg_t;
+
+struct xml_msg_list {
+        xml_fetch_msg_t *xml_msg;
+        struct xml_msg_list *next;
+};
+
+typedef struct xml_msg_list xml_msg_list_t;
+
+
 struct listener {
         uint32_t id;
         int clientfd;
@@ -88,6 +109,7 @@ struct listener {
         int lost_logs;
         char remote_ip[50];
         char *peer_nodename;
+        xml_msg_list_t *xml_msgs;
         struct ei_cnode_s *ec;
         struct listener *next;
 };
@@ -122,19 +144,8 @@ static struct {
         switch_bool_t ei_shortname;
         int ei_compat_rel;
         erlang_encoding_t encoding;
+        switch_bool_t bind_to_logger;
 } prefs;
-
-/*
-static struct {
-        switch_mutex_t *mutex;
-        switch_xml_t xml;
-        char uuid_str[SWITCH_UUID_FORMATTED_LENGTH + 1];
-        char *section;
-        char *tag_name;
-        char *key_value;
-        switch_bool_t responded;
-} xml_fetch_msg;
-*/
 
 /*static uint32_t next_id(void)
 {
@@ -232,6 +243,67 @@ static switch_status_t log_handler(const switch_log_node_t *node, switch_log_lev
         *listener = NULL;
         return SWITCH_STATUS_SUCCESS;
 }*/
+
+
+
+
+
+static switch_status_t push_into_listener_queue(xml_msg_list_t *xml_msgs, xml_fetch_msg_t *xml_msg) {
+	return SWITCH_TRUE;
+}
+
+
+static switch_xml_t xml_erlang_fetch(const char *section, const char *tag_name, const char *key_name, const char *key_value, switch_event_t *params,
+                                                                  void *user_data)
+{
+        switch_xml_t xml = NULL;
+	xml_fetch_msg_t *xml_msg;
+        switch_uuid_t uuid;
+        listener_t *l = NULL;
+
+        l = listen_list.listeners;
+	if (!l) {
+        	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Received a request for XML, ignoring since there are no erlang nodes connected.\n");
+                return xml;
+	}
+
+        /* Try each erlang listener */
+        while (l) {
+            xml_msg = switch_core_alloc(l->pool, sizeof(xml_msg));
+            memset(&xml_msg, 0, sizeof(xml_msg));
+
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Received a request for XML - %s / %s / %s\n", section, tag_name, key_name);
+
+            /* Create a unique identifier for this request */
+            switch_uuid_get(&uuid);
+            switch_uuid_format(xml_msg->uuid_str, &uuid);
+
+            /* Create a request in our queue for an XML binding. No need to copy memory pointers here, we block until they're used elsewhere and returned */
+            xml_msg->responded = SWITCH_FALSE;
+            xml_msg->section = section;
+            xml_msg->tag_name = tag_name;
+            xml_msg->key_name = key_name;
+            xml_msg->key_value = key_value;
+
+            push_into_listener_queue(l->xml_msgs, xml_msg);
+
+            /* Wait for a response or a timeout */
+            while (xml_msg->responded != SWITCH_TRUE) {
+                // FIXME: need to actually go get the xml here hehe
+                xml_msg->responded = SWITCH_TRUE;
+            }
+
+            l = l->next;
+        }
+
+        switch_safe_free(xml_msg);
+
+        return xml;
+}
+
+
+
+
 
 static void event_handler(switch_event_t *event)
 {
@@ -553,6 +625,8 @@ static int config(void)
                                         set_pref_ei_nodename(val);
                                 } else if (!strcmp(var, "shortname")) {
                                         prefs.ei_shortname = switch_true(val);
+                                } else if (!strcmp(var, "bind-to-logger")) {
+                                        prefs.bind_to_logger = switch_true(val);
                                 } else if (!strcmp(var, "compat-rel")) {
                                         if (atoi(val) >= 7)
                                                 prefs.ei_compat_rel = atoi(val);
@@ -683,6 +757,9 @@ switch_status_t initialize_ei(struct ei_cnode_s *ec, switch_sockaddr_t *sa)
 
         return SWITCH_STATUS_SUCCESS;
 }
+
+
+
 SWITCH_MODULE_LOAD_FUNCTION(mod_kazoo_load)
 {
 // FIX ME:        switch_api_interface_t *api_interface;
@@ -703,10 +780,13 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_kazoo_load)
         }
 
         /* bind to all logs */
-// FIXME: Invent this feature!!!        if (prefs.bind_to_logger) {
-		// FIX ME: Move to function
+        if (prefs.bind_to_logger) {
               switch_log_bind_logger(log_handler, SWITCH_LOG_DEBUG, SWITCH_FALSE);
-//        }
+        }
+
+        /* bind to all XML requests */
+        switch_xml_bind_search_function(xml_erlang_fetch, switch_xml_parse_section_string("directory"), NULL);
+        switch_xml_bind_search_function(xml_erlang_fetch, switch_xml_parse_section_string("dialplan"), NULL);
 
         /* connect my internal structure to the blank pointer passed to me */
         *module_interface = switch_loadable_module_create_module_interface(pool, modname);
@@ -741,6 +821,8 @@ SWITCH_MODULE_SHUTDOWN_FUNCTION(mod_kazoo_shutdown)
 
         switch_event_unbind(&globals.node);
 
+        switch_xml_unbind_search_function_ptr(xml_erlang_fetch);
+
         switch_safe_free(prefs.ip);
         switch_safe_free(prefs.ei_cookie);
 
@@ -752,11 +834,10 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
         switch_memory_pool_t *pool = NULL, *listener_pool = NULL;
         switch_status_t status;
         switch_sockaddr_t *sa;
-//        switch_socket_t *inbound_socket = NULL;
         listener_t *listener;
         struct ei_cnode_s ec; /* erlang c node interface connection */
         ErlConnect conn;
-		apr_os_sock_t sockfd;
+        apr_os_sock_t sockfd;
         int clientfd;
         int epmdfd;
 
@@ -831,7 +912,7 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime)
                  * mismatch or a godzilla attack (and a godzilla attack is highly likely) */
                 errno = 0;
 
-				apr_os_sock_get((apr_os_sock_t *) &sockfd, (apr_socket_t *) listen_list.sock);
+                apr_os_sock_get((apr_os_sock_t *) &sockfd, (apr_socket_t *) listen_list.sock);
 
                 if ((clientfd = ei_accept_tmo(&ec, (int) sockfd, &conn, 498)) == ERL_ERROR) {
                         if (prefs.done) {
