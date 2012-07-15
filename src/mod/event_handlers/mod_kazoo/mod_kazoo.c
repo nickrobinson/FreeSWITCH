@@ -33,6 +33,7 @@
 #include <switch.h>
 #include <ei.h>
 
+#define MAX_ACL 100
 #define CMD_BUFLEN 1024 * 1000
 #define MAX_QUEUE_LEN 25000
 #define MAX_MISSED 500
@@ -105,8 +106,6 @@ static struct {
         uint8_t ready;
 } listen_list;
 
-#define MAX_ACL 100
-
 static struct {
         switch_mutex_t *mutex;
         char *ip;
@@ -124,10 +123,6 @@ static struct {
         erlang_encoding_t encoding;
 } prefs;
 
-static void remove_listener(listener_t *listener);
-static void kill_listener(listener_t *l);
-static void kill_all_listeners(void);
-
 static uint32_t next_id(void)
 {
         uint32_t id;
@@ -141,8 +136,14 @@ SWITCH_DECLARE_GLOBAL_STRING_FUNC(set_pref_ip, prefs.ip);
 SWITCH_DECLARE_GLOBAL_STRING_FUNC(set_pref_ei_cookie, prefs.ei_cookie);
 SWITCH_DECLARE_GLOBAL_STRING_FUNC(set_pref_ei_nodename, prefs.ei_nodename);
 
+
+/* Function Definitions */
 static void *SWITCH_THREAD_FUNC listener_run(switch_thread_t *thread, void *obj);
 static void launch_listener_thread(listener_t *listener);
+static void remove_listener(listener_t *listener);
+static void kill_listener(listener_t *l);
+static void kill_all_listeners(void);
+
 
 static switch_status_t log_handler(const switch_log_node_t *node, switch_log_level_t level)
 {
