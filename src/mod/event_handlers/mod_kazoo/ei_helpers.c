@@ -26,8 +26,9 @@
  * Anthony Minessale II <anthm@freeswitch.org>
  * Andrew Thompson <andrew@hijacked.us>
  * Rob Charlton <rob.charlton@savageminds.com>
+ * Karl Anderson <karl@2600hz.com>
  *
- *
+ * Original from mod_erlang_event. 
  * ei_helpers.c -- helper functions for ei
  *
  */
@@ -37,7 +38,6 @@
 #include <netinet/in.h>
 #include <arpa/nameser.h>
 #include <resolv.h>
-
 #include "mod_kazoo.h"
 
 /* Stolen from code added to ei in R12B-5.
@@ -148,80 +148,6 @@ int ei_pid_from_rpc(struct ei_cnode_s *ec, int sockfd, erlang_ref * ref, char *m
 	return 0;
 }
 
-/* function to spawn a process on a remote node */
-int ei_spawn(struct ei_cnode_s *ec, int sockfd, erlang_ref * ref, char *module, char *function, int argc, char **argv)
-{
-	int i;
-	ei_x_buff buf;
-	ei_x_new_with_version(&buf);
-
-	ei_x_encode_tuple_header(&buf, 3);
-	ei_x_encode_atom(&buf, "$gen_call");
-	ei_x_encode_tuple_header(&buf, 2);
-	ei_x_encode_pid(&buf, ei_self(ec));
-//	ei_init_ref(ec, ref);
-	ei_x_encode_ref(&buf, ref);
-	ei_x_encode_tuple_header(&buf, 5);
-	ei_x_encode_atom(&buf, "spawn");
-	ei_x_encode_atom(&buf, module);
-	ei_x_encode_atom(&buf, function);
-
-	/* argument list */
-	if (argc < 0) {
-		ei_x_encode_list_header(&buf, argc);
-		for (i = 0; i < argc && argv[i]; i++) {
-			ei_x_encode_atom(&buf, argv[i]);
-		}
-	}
-
-	ei_x_encode_empty_list(&buf);
-
-	/*if (i != argc - 1) { */
-	/* horked argument list */
-	/*} */
-
-	ei_x_encode_pid(&buf, ei_self(ec));	/* should really be a valid group leader */
-
-#ifdef EI_DEBUG
-	ei_x_print_reg_msg(&buf, "net_kernel", 1);
-#endif
-	return ei_reg_send(ec, sockfd, "net_kernel", buf.buff, buf.index);
-
-}
-
-
-/* stolen from erts/emulator/beam/erl_term.h */
-#define _REF_NUM_SIZE    18
-#define MAX_REFERENCE    (1 << _REF_NUM_SIZE)
-
-/* function to fill in an erlang reference struct */
-/*
-void ei_init_ref(ei_cnode * ec, erlang_ref * ref)
-{
-	memset(ref, 0, sizeof(*ref)):
-	snprintf(ref->node, MAXATOMLEN, "%s", ec->thisnodename);
-
-	switch_mutex_lock(globals.ref_mutex);
-	globals.reference0++;
-	if (globals.reference0 >= MAX_REFERENCE) {
-		globals.reference0 = 0;
-		globals.reference1++;
-		if (globals.reference1 == 0) {
-			globals.reference2++;
-		}
-	}
-
-	ref->n[0] = globals.reference0;
-	ref->n[1] = globals.reference1;
-	ref->n[2] = globals.reference2;
-
-	switch_mutex_unlock(globals.ref_mutex);
-
-	ref->creation = 1;
-	ref->len = 3;
-}
-*/
-
 void ei_x_print_reg_msg(ei_x_buff * buf, char *dest, int send)
 {
 	char *mbuf = NULL;
@@ -230,9 +156,9 @@ void ei_x_print_reg_msg(ei_x_buff * buf, char *dest, int send)
 	ei_s_print_term(&mbuf, buf->buff, &i);
 
 	if (send) {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Sending %s to %s\n", mbuf, dest);
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Encoded term %s to '%s'\n", mbuf, dest);
 	} else {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Received %s from %s\n", mbuf, dest);
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Decoded term %s for '%s'\n", mbuf, dest);
 	}
 	free(mbuf);
 }
@@ -276,6 +202,24 @@ int ei_sendto(ei_cnode * ec, int fd, struct erlang_process *process, ei_x_buff *
 	return ret;
 }
 
+int ei_helper_send(listener_t *listener, erlang_pid* to, char* buf, int len) {
+	int ret = 0;
+
+	/* TODO: this isn't good enough, the fs_to_erl_loop might also try to write to the socket */
+	/*		because this can be called to send a response via erl_to_fs_loop handle_msg */
+	/*		We either need to lock or put the request into a fs_to_erl_loop queue */
+	switch_thread_rwlock_rdlock(listener->rwlock);
+	if (listener->clientfd) {
+			ret = ei_send(listener->clientfd, to, buf, len);
+	}
+	switch_thread_rwlock_unlock(listener->rwlock);
+
+#ifdef EI_DEBUG
+    ei_x_print_msg(rbuf, &pid, 1);
+#endif
+
+	return ret;
+}
 
 /* convert an erlang reference to some kind of hashed string so we can store it as a hash key */
 void ei_hash_ref(erlang_ref * ref, char *output)
