@@ -71,6 +71,10 @@ struct listener {
         switch_log_level_t level;
         uint8_t event_list[SWITCH_EVENT_ALL + 1];
         switch_hash_t *event_hash;
+        switch_hash_t *event_bindings;
+        switch_hash_t *session_bindings;
+        switch_hash_t *log_bindings;
+        switch_hash_t *fetch_bindings;
         switch_thread_rwlock_t *rwlock;
         switch_core_session_t *session;
         int lost_events;
@@ -103,7 +107,6 @@ struct prefs_s {
 
 typedef struct prefs_s prefs_t;
 
-/*
 struct api_command_struct {
 	char *api_cmd;
 	char *arg;
@@ -112,18 +115,24 @@ struct api_command_struct {
 	uint8_t bg;
 	erlang_pid pid;
 	switch_memory_pool_t *pool;
-};*/
+};
+
+/* kazoo_binding.c */
+switch_status_t add_event_binding(listener_t *listener, switch_event_types_t *type, erlang_pid *from);
+switch_status_t list_event_bindings(listener_t *listener);
+
+/* handle_msg.c */
+switch_status_t handle_msg(listener_t *listener, erlang_msg * msg, ei_x_buff * buf, ei_x_buff * rbuf);
 
 /* ei_helpers.c */
 void ei_link(listener_t *listener, erlang_pid * from, erlang_pid * to);
 void ei_encode_switch_event_headers(ei_x_buff * ebuf, switch_event_t *event, prefs_t *prefs);
 void ei_encode_switch_event_tag(ei_x_buff * ebuf, switch_event_t *event, char *tag, prefs_t *prefs);
 int ei_pid_from_rpc(struct ei_cnode_s *ec, int sockfd, erlang_ref * ref, char *module, char *function);
-int ei_spawn(struct ei_cnode_s *ec, int sockfd, erlang_ref * ref, char *module, char *function, int argc, char **argv);
-void ei_init_ref(struct ei_cnode_s *ec, erlang_ref * ref);
 void ei_x_print_reg_msg(ei_x_buff * buf, char *dest, int send);
 void ei_x_print_msg(ei_x_buff * buf, erlang_pid * pid, int send);
 int ei_sendto(ei_cnode * ec, int fd, struct erlang_process *process, ei_x_buff * buf);
+int ei_helper_send(listener_t *listener, erlang_pid* to, char* buf, int len);
 void ei_hash_ref(erlang_ref * ref, char *output);
 int ei_compare_pids(erlang_pid * pid1, erlang_pid * pid2);
 int ei_decode_string_or_binary(char *buf, int *index, int maxlen, char *dst);
