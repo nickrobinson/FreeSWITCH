@@ -1474,16 +1474,17 @@ static int sofia_presence_sub_reg_callback(void *pArg, int argc, char **argv, ch
 	sofia_profile_t *profile = (sofia_profile_t *) pArg;
 	char *user = argv[1];
 	char *host = argv[2];
+	char *sub_to_user = argv[3];
 	switch_event_t *event;
 	char *event_name = argv[5];
 	char *expires = argv[10];
 
 	if (!strcasecmp(event_name, "message-summary")) {
 		if (switch_event_create(&event, SWITCH_EVENT_MESSAGE_QUERY) == SWITCH_STATUS_SUCCESS) {
-			switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Message-Account", "sip:%s@%s", user, host);
+			switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Message-Account", "sip:%s@%s", sub_to_user, host);
 			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "VM-Sofia-Profile", profile->name);
 			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "VM-sub-call-id", argv[7]);
-		    switch_event_add_header(event, SWITCH_STACK_BOTTOM, "VM-From", "%s@%s", user, host);
+		    switch_event_add_header(event, SWITCH_STACK_BOTTOM, "VM-User", "%s@%s", user, host);
 			switch_event_fire(&event);
 		}
 		return 0;
@@ -3271,6 +3272,7 @@ void sofia_presence_handle_sip_i_subscribe(int status,
 	char *full_via = NULL;
 	char *full_agent = NULL;
 	char *sstr;
+	char *dialog_state = "new";
 	switch_event_t *sevent;
 	int sub_state = nua_substate_pending;
 	int sent_reply = 0;
@@ -3412,6 +3414,7 @@ void sofia_presence_handle_sip_i_subscribe(int status,
 	}
 
 	if (sub_state == nua_substate_active) {
+		dialog_state="active";
 		
 		sstr = switch_mprintf("active;expires=%ld", exp_delta);
 		
@@ -3425,11 +3428,13 @@ void sofia_presence_handle_sip_i_subscribe(int status,
 			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR,
 							  "re-subscribe event %s, sql: %s\n", event, sql);
 		}
-		
+
 		sofia_glue_execute_sql_now(profile, &sql, SWITCH_TRUE);
 	} else {
 
 		if (sub_state == nua_substate_terminated) {
+			dialog_state="terminated";
+
 			sql = switch_mprintf("delete from sip_subscriptions where call_id='%q' and profile_name='%q' and hostname='%q'", 
 								 call_id, profile->name, mod_sofia_globals.hostname);
 		
@@ -3454,7 +3459,7 @@ void sofia_presence_handle_sip_i_subscribe(int status,
 				switch_snprintf(accept + strlen(accept), sizeof(accept) - strlen(accept), "%s%s ", ap->ac_type, ap->ac_next ? "," : "");
 				ap = ap->ac_next;
 			}
-			
+	
 			sql = switch_mprintf("insert into sip_subscriptions "
 								 "(proto,sip_user,sip_host,sub_to_user,sub_to_host,presence_hosts,event,contact,call_id,full_from,"
 								 "full_via,expires,user_agent,accept,profile_name,hostname,network_port,network_ip,version,orig_proto, full_to) "
@@ -3643,7 +3648,7 @@ void sofia_presence_handle_sip_i_subscribe(int status,
 		if ((sql = switch_mprintf("select proto,sip_user,'%q',sub_to_user,sub_to_host,event,contact,call_id,full_from,"
 								  "full_via,expires,user_agent,accept,profile_name,network_ip"
 								  " from sip_subscriptions where hostname='%q' and profile_name='%q' and "
-								  "event='message-summary' and sip_user='%q' "
+								  "event='message-summary' and sub_to_user='%q'"
 								  "and (sip_host='%q' or presence_hosts like '%%%q%%')", 
 								  to_host, mod_sofia_globals.hostname, profile->name,
 								  to_user, to_host, to_host))) {
@@ -3742,6 +3747,7 @@ void sofia_presence_handle_sip_i_subscribe(int status,
 					switch_event_add_header_string(sevent, SWITCH_STACK_BOTTOM, "alt_event_type", "dialog");
 					switch_event_add_header_string(sevent, SWITCH_STACK_BOTTOM, "expires", exp_delta_str);
 					switch_event_add_header_string(sevent, SWITCH_STACK_BOTTOM, "sub-call-id", call_id);
+		   			switch_event_add_header_string(sevent, SWITCH_STACK_BOTTOM, "dialog_state", dialog_state);
 					switch_event_fire(&sevent);
 				}
 			} else if (!strcasecmp(event, "presence")) {
@@ -3756,6 +3762,7 @@ void sofia_presence_handle_sip_i_subscribe(int status,
 					switch_event_add_header_string(sevent, SWITCH_STACK_BOTTOM, "rpid", "unknown");
 					switch_event_add_header_string(sevent, SWITCH_STACK_BOTTOM, "status", "Registered");
 					switch_event_add_header_string(sevent, SWITCH_STACK_BOTTOM, "sub-call-id", call_id);
+		   			switch_event_add_header_string(sevent, SWITCH_STACK_BOTTOM, "dialog_state", dialog_state);
 					switch_event_fire(&sevent);
 				}					
 			}
