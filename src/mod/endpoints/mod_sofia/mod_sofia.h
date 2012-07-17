@@ -439,9 +439,11 @@ typedef enum {
 
 struct sofia_gateway_subscription {
 	sofia_gateway_t *gateway;
+	nua_handle_t *nh;
 	char *expires_str;
 	char *event;				/* eg, 'message-summary' to subscribe to MWI events */
 	char *content_type;			/* eg, application/simple-message-summary in the case of MWI events */
+	char *request_uri;
 	uint32_t freq;
 	int32_t retry_seconds;
 	time_t expires;
@@ -453,7 +455,6 @@ struct sofia_gateway_subscription {
 struct sofia_gateway {
 	sofia_private_t *sofia_private;
 	nua_handle_t *nh;
-	nua_handle_t *sub_nh;
 	sofia_profile_t *profile;
 	char *name;
 	char *register_scheme;
@@ -492,7 +493,6 @@ struct sofia_gateway {
 	int32_t retry_seconds;
 	int32_t reg_timeout_seconds;
 	int32_t failure_status;
-	sub_state_t sub_state;
 	reg_state_t state;
 	switch_memory_pool_t *pool;
 	int deleted;
