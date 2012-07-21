@@ -4,28 +4,28 @@
 #define MAX_MISSED 500
 
 typedef enum {
-        LFLAG_AUTHED = (1 << 0),
-        LFLAG_RUNNING = (1 << 1),
-        LFLAG_EVENTS = (1 << 2),
-        LFLAG_LOG = (1 << 3),
-        LFLAG_FULL = (1 << 4),
-        LFLAG_MYEVENTS = (1 << 5),
-        LFLAG_SESSION = (1 << 6),
-        LFLAG_ASYNC = (1 << 7),
-        LFLAG_STATEFUL = (1 << 8),
-        LFLAG_OUTBOUND = (1 << 9),
-        LFLAG_LINGER = (1 << 10),
-        LFLAG_HANDLE_DISCO = (1 << 11),
-        LFLAG_CONNECTED = (1 << 12),
-        LFLAG_RESUME = (1 << 13),
-        LFLAG_AUTH_EVENTS = (1 << 14),
-        LFLAG_ALL_EVENTS_AUTHED = (1 << 15),
-        LFLAG_ALLOW_LOG = (1 << 16)
+	LFLAG_AUTHED = (1 << 0),
+	LFLAG_RUNNING = (1 << 1),
+	LFLAG_EVENTS = (1 << 2),
+	LFLAG_LOG = (1 << 3),
+	LFLAG_FULL = (1 << 4),
+	LFLAG_MYEVENTS = (1 << 5),
+	LFLAG_SESSION = (1 << 6),
+	LFLAG_ASYNC = (1 << 7),
+	LFLAG_STATEFUL = (1 << 8),
+	LFLAG_OUTBOUND = (1 << 9),
+	LFLAG_LINGER = (1 << 10),
+	LFLAG_HANDLE_DISCO = (1 << 11),
+	LFLAG_CONNECTED = (1 << 12),
+	LFLAG_RESUME = (1 << 13),
+	LFLAG_AUTH_EVENTS = (1 << 14),
+	LFLAG_ALL_EVENTS_AUTHED = (1 << 15),
+	LFLAG_ALLOW_LOG = (1 << 16)
 } event_flag_t;
 
 typedef enum {
-        ERLANG_STRING = 0,
-        ERLANG_BINARY
+	ERLANG_STRING = 0,
+	ERLANG_BINARY
 } erlang_encoding_t;
 
 typedef enum {
@@ -41,67 +41,67 @@ struct erlang_process {
 };
 
 struct xml_fetch_msg {
-        switch_mutex_t *mutex;
-        switch_xml_t xml;
-        char uuid_str[SWITCH_UUID_FORMATTED_LENGTH + 1];
-        const char *section;
-        const char *tag_name;
-        const char *key_name;
-        const char *key_value;
-        switch_bool_t responded;
+	switch_mutex_t *mutex;
+	switch_xml_t xml;
+	char uuid_str[SWITCH_UUID_FORMATTED_LENGTH + 1];
+	const char *section;
+	const char *tag_name;
+	const char *key_name;
+	const char *key_value;
+	switch_bool_t responded;
 };
 
 typedef struct xml_fetch_msg xml_fetch_msg_t;
 
 struct xml_msg_list {
-        xml_fetch_msg_t *xml_msg;
-        struct xml_msg_list *next;
+	xml_fetch_msg_t *xml_msg;
+	struct xml_msg_list *next;
 };
 
 typedef struct xml_msg_list xml_msg_list_t;
 
 struct listener {
-        uint32_t id;
-        int clientfd;
-        switch_queue_t *event_queue;
-        switch_queue_t *log_queue;
-        switch_memory_pool_t *pool;
-        switch_mutex_t *flag_mutex;
-        uint32_t flags;
-        switch_log_level_t level;
-        uint8_t event_list[SWITCH_EVENT_ALL + 1];
-        switch_hash_t *event_hash;
-        switch_hash_t *event_bindings;
-        switch_hash_t *session_bindings;
-        switch_hash_t *log_bindings;
-        switch_hash_t *fetch_bindings;
-        switch_thread_rwlock_t *rwlock;
-        switch_core_session_t *session;
-        int lost_events;
-        int lost_logs;
-        char remote_ip[50];
-        char *peer_nodename;
+	uint32_t id;
+	int clientfd;
+	switch_queue_t *event_queue;
+	switch_queue_t *log_queue;
+	switch_memory_pool_t *pool;
+	switch_mutex_t *flag_mutex;
+	uint32_t flags;
+	switch_log_level_t level;
+	uint8_t event_list[SWITCH_EVENT_ALL + 1];
+	switch_hash_t *event_hash;
+	switch_hash_t *event_bindings;
+	switch_hash_t *session_bindings;
+	switch_hash_t *log_bindings;
+	switch_hash_t *fetch_bindings;
+	switch_thread_rwlock_t *rwlock;
+	switch_core_session_t *session;
+	int lost_events;
+	int lost_logs;
+	char remote_ip[50];
+	char *peer_nodename;
 	xml_msg_list_t *xml_msgs;
-        struct ei_cnode_s *ec;
-        struct listener *next;
+	struct ei_cnode_s *ec;
+	struct listener *next;
 };
 typedef struct listener listener_t;
 
 struct prefs_s { 
-        switch_mutex_t *mutex;
-        char *ip;
-        uint16_t port;
-        int done;
-        int threads;
-        char *acl[MAX_ACL];
-        uint32_t acl_count;
-        uint32_t id;
-        int nat_map;
-        char *ei_cookie;
-        char *ei_nodename;
-        switch_bool_t ei_shortname;
-        int ei_compat_rel;
-        erlang_encoding_t encoding;
+	switch_mutex_t *mutex;
+	char *ip;
+	uint16_t port;
+	int done;
+	int threads;
+	char *acl[MAX_ACL];
+	uint32_t acl_count;
+	uint32_t id;
+	int nat_map;
+	char *ei_cookie;
+	char *ei_nodename;
+	switch_bool_t ei_shortname;
+	int ei_compat_rel;
+	erlang_encoding_t encoding;
 	switch_bool_t bind_to_logger;
 } prefs;
 
@@ -143,9 +143,20 @@ switch_status_t initialize_ei(struct ei_cnode_s *ec, switch_sockaddr_t *sa, pref
 /* crazy macro for toggling encoding type */
 #define _ei_x_encode_string(buf, string) switch (prefs->encoding) { \
 	case ERLANG_BINARY: \
-		ei_x_encode_binary(buf, string, strlen(string)); \
-		break; \
+						ei_x_encode_binary(buf, string, strlen(string)); \
+	break; \
 	default: \
-		ei_x_encode_string(buf, string); \
-		break; \
+			 ei_x_encode_string(buf, string); \
+	break; \
 }
+
+/* For Emacs:
+ * Local Variables:
+ * mode:c
+ * indent-tabs-mode:t
+ * tab-width:4
+ * c-basic-offset:4
+ * End:
+ * For VIM:
+ * vim:set softtabstop=4 shiftwidth=4 tabstop=4:
+ */

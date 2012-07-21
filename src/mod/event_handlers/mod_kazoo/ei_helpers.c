@@ -210,12 +210,12 @@ int ei_helper_send(listener_t *listener, erlang_pid* to, char* buf, int len) {
 	/*		We either need to lock or put the request into a fs_to_erl_loop queue */
 	switch_thread_rwlock_rdlock(listener->rwlock);
 	if (listener->clientfd) {
-			ret = ei_send(listener->clientfd, to, buf, len);
+		ret = ei_send(listener->clientfd, to, buf, len);
 	}
 	switch_thread_rwlock_unlock(listener->rwlock);
 
 #ifdef EI_DEBUG
-    ei_x_print_msg(rbuf, &pid, 1);
+	ei_x_print_msg(rbuf, &pid, 1);
 #endif
 
 	return ret;
@@ -250,7 +250,7 @@ int ei_decode_string_or_binary(char *buf, int *index, int maxlen, char *dst)
 		return -1;
 	} else if (size > maxlen) {
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Requested decoding of %s with size %d into a buffer of size %d\n",
-						  type == ERL_BINARY_EXT ? "binary" : "string", size, maxlen);
+				type == ERL_BINARY_EXT ? "binary" : "string", size, maxlen);
 		return -1;
 	} else if (type == ERL_BINARY_EXT) {
 		res = ei_decode_binary(buf, index, dst, &len);
@@ -264,60 +264,60 @@ int ei_decode_string_or_binary(char *buf, int *index, int maxlen, char *dst)
 
 switch_status_t initialize_ei(struct ei_cnode_s *ec, switch_sockaddr_t *sa, prefs_t *prefs)
 {
-        struct hostent *nodehost;
-        char thishostname[EI_MAXHOSTNAMELEN + 1] = "";
-        char thisnodename[MAXNODELEN + 1];
-        char thisalivename[EI_MAXALIVELEN + 1];
-        //EI_MAX_COOKIE_SIZE+1
-        char ipbuf[25];
-        const char *ip_addr;
-        char *atsign;
+	struct hostent *nodehost;
+	char thishostname[EI_MAXHOSTNAMELEN + 1] = "";
+	char thisnodename[MAXNODELEN + 1];
+	char thisalivename[EI_MAXALIVELEN + 1];
+	//EI_MAX_COOKIE_SIZE+1
+	char ipbuf[25];
+	const char *ip_addr;
+	char *atsign;
 
-        /* copy the erlang interface nodename into something we can modify */
-        strncpy(thisalivename, prefs->ei_nodename, EI_MAXALIVELEN);
+	/* copy the erlang interface nodename into something we can modify */
+	strncpy(thisalivename, prefs->ei_nodename, EI_MAXALIVELEN);
 
-        ip_addr = switch_get_addr(ipbuf, sizeof(ipbuf), sa);
+	ip_addr = switch_get_addr(ipbuf, sizeof(ipbuf), sa);
 
-        if ((atsign = strchr(thisalivename, '@'))) {
-                /* we got a qualified node name, don't guess the host/domain */
-                snprintf(thisnodename, MAXNODELEN + 1, "%s", prefs->ei_nodename);
-                /* truncate the alivename at the @ */
-                *atsign = '\0';
-        } else {
-                if ((nodehost = gethostbyaddr(ip_addr, sizeof(ip_addr), AF_INET))) {
-                        memcpy(thishostname, nodehost->h_name, EI_MAXHOSTNAMELEN);
-                }
+	if ((atsign = strchr(thisalivename, '@'))) {
+		/* we got a qualified node name, don't guess the host/domain */
+		snprintf(thisnodename, MAXNODELEN + 1, "%s", prefs->ei_nodename);
+		/* truncate the alivename at the @ */
+		*atsign = '\0';
+	} else {
+		if ((nodehost = gethostbyaddr(ip_addr, sizeof(ip_addr), AF_INET))) {
+			memcpy(thishostname, nodehost->h_name, EI_MAXHOSTNAMELEN);
+		}
 
-                if (zstr_buf(thishostname) || !strncasecmp(prefs->ip, "0.0.0.0", 7)) {
-                        gethostname(thishostname, EI_MAXHOSTNAMELEN);
-                }
+		if (zstr_buf(thishostname) || !strncasecmp(prefs->ip, "0.0.0.0", 7)) {
+			gethostname(thishostname, EI_MAXHOSTNAMELEN);
+		}
 
-                if (prefs->ei_shortname) {
-                        char *off;
-                        if ((off = strchr(thishostname, '.'))) {
-                                *off = '\0';
-                        }
-                } else {
-                        if (!(_res.options & RES_INIT)) {
-                                // init the resolver
-                                res_init();
-                        }
-                        if (_res.dnsrch[0] && !zstr_buf(_res.dnsrch[0])) {
-                                strncat(thishostname, ".", 1);
-                                strncat(thishostname, _res.dnsrch[0], EI_MAXHOSTNAMELEN - strlen(thishostname));
-                        }
+		if (prefs->ei_shortname) {
+			char *off;
+			if ((off = strchr(thishostname, '.'))) {
+				*off = '\0';
+			}
+		} else {
+			if (!(_res.options & RES_INIT)) {
+				// init the resolver
+				res_init();
+			}
+			if (_res.dnsrch[0] && !zstr_buf(_res.dnsrch[0])) {
+				strncat(thishostname, ".", 1);
+				strncat(thishostname, _res.dnsrch[0], EI_MAXHOSTNAMELEN - strlen(thishostname));
+			}
 
-                }
-                snprintf(thisnodename, MAXNODELEN + 1, "%s@%s", prefs->ei_nodename, thishostname);
-        }
+		}
+		snprintf(thisnodename, MAXNODELEN + 1, "%s@%s", prefs->ei_nodename, thishostname);
+	}
 
-        /* init the ec stuff */
-        if (ei_connect_xinit(ec, thishostname, thisalivename, thisnodename, (Erl_IpAddr)ip_addr, prefs->ei_cookie, 0) < 0) {
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Failed to initialize the erlang interface connection structure\n");
-                return SWITCH_STATUS_FALSE;
-        }
+	/* init the ec stuff */
+	if (ei_connect_xinit(ec, thishostname, thisalivename, thisnodename, (Erl_IpAddr)ip_addr, prefs->ei_cookie, 0) < 0) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Failed to initialize the erlang interface connection structure\n");
+		return SWITCH_STATUS_FALSE;
+	}
 
-        return SWITCH_STATUS_SUCCESS;
+	return SWITCH_STATUS_SUCCESS;
 }
 
 /* For Emacs:

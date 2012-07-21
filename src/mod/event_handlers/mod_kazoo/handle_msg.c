@@ -92,40 +92,40 @@ static switch_status_t handle_msg_tuple(listener_t *listener, erlang_msg * msg, 
 		ei_x_encode_atom(rbuf, "badarg");
 	} else {
 		if (!strncmp(tupletag, "event", MAXATOMLEN)) {
-            ret = handle_msg_event(listener, msg, arity, buf, rbuf);
-/*		} else if (!strncmp(tupletag, "fetch_reply", MAXATOMLEN)) {
-			ret = handle_msg_fetch_reply(listener, buf, rbuf);
-		} else if (!strncmp(tupletag, "set_log_level", MAXATOMLEN)) {
-			ret = handle_msg_set_log_level(listener, arity, buf, rbuf);
-		} else if (!strncmp(tupletag, "session_event", MAXATOMLEN)) {
-			ret = handle_msg_session_event(listener, msg, arity, buf, rbuf);
-		} else if (!strncmp(tupletag, "nixevent", MAXATOMLEN)) {
-			ret = handle_msg_nixevent(listener, arity, buf, rbuf);
-		} else if (!strncmp(tupletag, "session_nixevent", MAXATOMLEN)) {
-			ret = handle_msg_session_nixevent(listener, msg, arity, buf, rbuf);
-		} else if (!strncmp(tupletag, "api", MAXATOMLEN)) {
-			ret = handle_msg_api(listener, msg, arity, buf, rbuf);
-		} else if (!strncmp(tupletag, "bgapi", MAXATOMLEN)) {
-			ret = handle_msg_bgapi(listener, msg, arity, buf, rbuf);
-		} else if (!strncmp(tupletag, "sendevent", MAXATOMLEN)) {
-			ret = handle_msg_sendevent(listener, arity, buf, rbuf);
-		} else if (!strncmp(tupletag, "sendmsg", MAXATOMLEN)) {
-			ret = handle_msg_sendmsg(listener, arity, buf, rbuf);
-		} else if (!strncmp(tupletag, "bind", MAXATOMLEN)) {
-			ret = handle_msg_bind(listener, msg, buf, rbuf);
-		} else if (!strncmp(tupletag, "handlecall", MAXATOMLEN)) {
-			ret = handle_msg_handlecall(listener, msg, arity, buf, rbuf);
-		} else if (!strncmp(tupletag, "rex", MAXATOMLEN)) {
-			ret = handle_msg_rpcresponse(listener, msg, arity, buf, rbuf);
-		} else if (!strncmp(tupletag, "setevent", MAXATOMLEN)) {
-			ret = handle_msg_setevent(listener, msg, arity, buf, rbuf);
-		} else if (!strncmp(tupletag, "session_setevent", MAXATOMLEN)) {
-			ret = handle_msg_session_setevent(listener, msg, arity, buf, rbuf); */
-		} else {
-			ei_x_encode_tuple_header(rbuf, 2);
-			ei_x_encode_atom(rbuf, "error");
-			ei_x_encode_atom(rbuf, "undef");
-		}
+			ret = handle_msg_event(listener, msg, arity, buf, rbuf);
+			/*		} else if (!strncmp(tupletag, "fetch_reply", MAXATOMLEN)) {
+					ret = handle_msg_fetch_reply(listener, buf, rbuf);
+					} else if (!strncmp(tupletag, "set_log_level", MAXATOMLEN)) {
+					ret = handle_msg_set_log_level(listener, arity, buf, rbuf);
+					} else if (!strncmp(tupletag, "session_event", MAXATOMLEN)) {
+					ret = handle_msg_session_event(listener, msg, arity, buf, rbuf);
+					} else if (!strncmp(tupletag, "nixevent", MAXATOMLEN)) {
+					ret = handle_msg_nixevent(listener, arity, buf, rbuf);
+					} else if (!strncmp(tupletag, "session_nixevent", MAXATOMLEN)) {
+					ret = handle_msg_session_nixevent(listener, msg, arity, buf, rbuf);
+					} else if (!strncmp(tupletag, "api", MAXATOMLEN)) {
+					ret = handle_msg_api(listener, msg, arity, buf, rbuf);
+					} else if (!strncmp(tupletag, "bgapi", MAXATOMLEN)) {
+					ret = handle_msg_bgapi(listener, msg, arity, buf, rbuf);
+					} else if (!strncmp(tupletag, "sendevent", MAXATOMLEN)) {
+					ret = handle_msg_sendevent(listener, arity, buf, rbuf);
+					} else if (!strncmp(tupletag, "sendmsg", MAXATOMLEN)) {
+					ret = handle_msg_sendmsg(listener, arity, buf, rbuf);
+					} else if (!strncmp(tupletag, "bind", MAXATOMLEN)) {
+					ret = handle_msg_bind(listener, msg, buf, rbuf);
+					} else if (!strncmp(tupletag, "handlecall", MAXATOMLEN)) {
+					ret = handle_msg_handlecall(listener, msg, arity, buf, rbuf);
+					} else if (!strncmp(tupletag, "rex", MAXATOMLEN)) {
+					ret = handle_msg_rpcresponse(listener, msg, arity, buf, rbuf);
+					} else if (!strncmp(tupletag, "setevent", MAXATOMLEN)) {
+					ret = handle_msg_setevent(listener, msg, arity, buf, rbuf);
+					} else if (!strncmp(tupletag, "session_setevent", MAXATOMLEN)) {
+					ret = handle_msg_session_setevent(listener, msg, arity, buf, rbuf); */
+	} else {
+		ei_x_encode_tuple_header(rbuf, 2);
+		ei_x_encode_atom(rbuf, "error");
+		ei_x_encode_atom(rbuf, "undef");
+	}
 	}
 	return ret;
 }
@@ -231,42 +231,42 @@ switch_status_t handle_msg(listener_t *listener, erlang_msg * msg, ei_x_buff * b
 		ei_get_type(buf->buff, &buf->index, &type, &size);
 
 		switch (type) {
-		case ERL_SMALL_TUPLE_EXT:
-		case ERL_LARGE_TUPLE_EXT:
-			tmpindex = buf->index;
-			ei_decode_tuple_header(buf->buff, &tmpindex, &arity);
-			ei_get_type(buf->buff, &tmpindex, &type2, &size);
+			case ERL_SMALL_TUPLE_EXT:
+			case ERL_LARGE_TUPLE_EXT:
+				tmpindex = buf->index;
+				ei_decode_tuple_header(buf->buff, &tmpindex, &arity);
+				ei_get_type(buf->buff, &tmpindex, &type2, &size);
 
-			switch (type2) {
+				switch (type2) {
+					case ERL_ATOM_EXT:
+						ret = handle_msg_tuple(listener, msg, buf, rbuf);
+						break;
+					case ERL_REFERENCE_EXT:
+					case ERL_NEW_REFERENCE_EXT:
+						//				ret = handle_ref_tuple(listener, msg, buf, rbuf);
+						break;
+					default:
+						switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "Received unexpected erlang tuple, first element of type %d\n", type2);
+						/* some other kind of erlang term */
+						ei_x_encode_tuple_header(rbuf, 2);
+						ei_x_encode_atom(rbuf, "error");
+						ei_x_encode_atom(rbuf, "undef");
+						break;
+				}
+
+				break;
+
 			case ERL_ATOM_EXT:
-				ret = handle_msg_tuple(listener, msg, buf, rbuf);
+				//			ret = handle_msg_atom(listener, msg, buf, rbuf);
 				break;
-			case ERL_REFERENCE_EXT:
-			case ERL_NEW_REFERENCE_EXT:
-//				ret = handle_ref_tuple(listener, msg, buf, rbuf);
-				break;
+
 			default:
-				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "Received unexpected erlang tuple, first element of type %d\n", type2);
 				/* some other kind of erlang term */
+				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "Received unexpected erlang term, started with type %d\n", type);
 				ei_x_encode_tuple_header(rbuf, 2);
 				ei_x_encode_atom(rbuf, "error");
 				ei_x_encode_atom(rbuf, "undef");
 				break;
-			}
-
-			break;
-
-		case ERL_ATOM_EXT:
-//			ret = handle_msg_atom(listener, msg, buf, rbuf);
-			break;
-
-		default:
-			/* some other kind of erlang term */
-			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "Received unexpected erlang term, started with type %d\n", type);
-			ei_x_encode_tuple_header(rbuf, 2);
-			ei_x_encode_atom(rbuf, "error");
-			ei_x_encode_atom(rbuf, "undef");
-			break;
 		}
 	}
 
