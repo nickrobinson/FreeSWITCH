@@ -60,7 +60,7 @@ switch_status_t add_event_binding(listener_t *listener, switch_event_types_t *ty
 switch_status_t rm_event_pid(listener_t *listener, erlang_pid *from) {
 	switch_hash_index_t *events;
 	switch_hash_t *bindings;
-	erlang_pid *pid;
+	const char *remove_key;
 
 	remove_key = switch_core_sprintf(listener->pool, "<%d.%d.%d>", from->creation, from->num, from->serial);
 
@@ -68,7 +68,7 @@ switch_status_t rm_event_pid(listener_t *listener, erlang_pid *from) {
 	    const void *key;
 	    void *value;
 
-        switch_hash_this(events, &key, NULL, &value1);
+        switch_hash_this(events, &key, NULL, &value);
         bindings = (switch_hash_t*)value;
 
 		switch_core_hash_delete(bindings, remove_key);
