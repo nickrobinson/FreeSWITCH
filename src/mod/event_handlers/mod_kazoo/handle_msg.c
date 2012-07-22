@@ -38,8 +38,42 @@
 #include <ei.h>
 #include "mod_kazoo.h"
 
+static switch_status_t handle_msg_nixevent(listener_t *listener, erlang_msg * msg, int arity, ei_x_buff * buf, ei_x_buff * rbuf) 
+{
+	char atom[MAXATOMLEN];
 
-static switch_status_t handle_msg_event(listener_t *listener, erlang_msg * msg, int arity, ei_x_buff * buf, ei_x_buff * rbuf)
+	if (arity == 1) {
+        ei_x_encode_tuple_header(rbuf, 2);
+        ei_x_encode_atom(rbuf, "error");
+        ei_x_encode_atom(rbuf, "badarg");
+    } else {
+        switch_event_types_t type;
+		int custom = 0;
+
+        for (int i = 1; i < arity; i++) {
+            if (!ei_decode_atom(buf->buff, &buf->index, atom)) {
+        
+                if (custom) { 
+					/* TODO: figure out what to do with custom events... */
+                } else if (switch_name_event(atom, &type) == SWITCH_STATUS_SUCCESS) {
+                    if (type == SWITCH_EVENT_CUSTOM) {
+                        custom++;
+                    } else if (type == SWITCH_EVENT_ALL) {
+						remove_pid_from_event_bindings(listener, &msg->from);
+                    } else {
+						remove_pid_from_event_binding(listener, &type, &msg->from);
+                    }
+                }
+            }
+        }
+
+		ei_x_encode_atom(rbuf, "ok");
+	}
+	
+	return SWITCH_STATUS_SUCCESS;
+}
+
+static switch_status_t handle_msg_event(listener_t *listener, erlang_msg * msg, int arity, ei_x_buff * buf, ei_x_buff * rbuf) 
 {
 	char atom[MAXATOMLEN];
 
@@ -48,34 +82,31 @@ static switch_status_t handle_msg_event(listener_t *listener, erlang_msg * msg, 
 		ei_x_encode_atom(rbuf, "error");
 		ei_x_encode_atom(rbuf, "badarg");
 	} else {
-		int custom = 0;
 		switch_event_types_t type;
-		int i = 0;
+		int custom = 0;
 
-		for (i = 1; i < arity; i++) {
+		for (int i = 1; i < arity; i++) {
 			if (!ei_decode_atom(buf->buff, &buf->index, atom)) {
 				if (custom) {
-					switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Bind custom event %s to %s <%d.%d.%d>\n", atom, msg->from.node, msg->from.creation, msg->from.num, msg->from.serial);
 					/* TODO: figure out what to do with custom events.... */
 				} else if (switch_name_event(atom, &type) == SWITCH_STATUS_SUCCESS) {
-					if (type == SWITCH_EVENT_ALL) {
+                    if (type == SWITCH_EVENT_CUSTOM) {
+                        custom++;
+                    } else if (type == SWITCH_EVENT_ALL) {
 						switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Bind ALL events to %s <%d.%d.%d>\n", msg->from.node, msg->from.creation, msg->from.num, msg->from.serial);
 						for (uint32_t x = 0; x < SWITCH_EVENT_ALL; x++) {
 							add_event_binding(listener, &type, &msg->from);
 						}
-					}
-					if (type <= SWITCH_EVENT_ALL) {
-						switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Bind event %s to %s <%d.%d.%d>\n", atom, msg->from.node, msg->from.creation, msg->from.num, msg->from.serial);
+					} else if (type <= SWITCH_EVENT_ALL) {
 						add_event_binding(listener, &type, &msg->from);
-					}
-					if (type == SWITCH_EVENT_CUSTOM) {
-						custom++;
 					}
 				}
 			}
 		}
+
 		ei_x_encode_atom(rbuf, "ok");
 	}
+
 	return SWITCH_STATUS_SUCCESS;
 }
 
@@ -93,45 +124,89 @@ static switch_status_t handle_msg_tuple(listener_t *listener, erlang_msg * msg, 
 	} else {
 		if (!strncmp(tupletag, "event", MAXATOMLEN)) {
 			ret = handle_msg_event(listener, msg, arity, buf, rbuf);
-			/*		} else if (!strncmp(tupletag, "fetch_reply", MAXATOMLEN)) {
-					ret = handle_msg_fetch_reply(listener, buf, rbuf);
-					} else if (!strncmp(tupletag, "set_log_level", MAXATOMLEN)) {
-					ret = handle_msg_set_log_level(listener, arity, buf, rbuf);
-					} else if (!strncmp(tupletag, "session_event", MAXATOMLEN)) {
-					ret = handle_msg_session_event(listener, msg, arity, buf, rbuf);
-					} else if (!strncmp(tupletag, "nixevent", MAXATOMLEN)) {
-					ret = handle_msg_nixevent(listener, arity, buf, rbuf);
-					} else if (!strncmp(tupletag, "session_nixevent", MAXATOMLEN)) {
-					ret = handle_msg_session_nixevent(listener, msg, arity, buf, rbuf);
-					} else if (!strncmp(tupletag, "api", MAXATOMLEN)) {
-					ret = handle_msg_api(listener, msg, arity, buf, rbuf);
-					} else if (!strncmp(tupletag, "bgapi", MAXATOMLEN)) {
-					ret = handle_msg_bgapi(listener, msg, arity, buf, rbuf);
-					} else if (!strncmp(tupletag, "sendevent", MAXATOMLEN)) {
-					ret = handle_msg_sendevent(listener, arity, buf, rbuf);
-					} else if (!strncmp(tupletag, "sendmsg", MAXATOMLEN)) {
-					ret = handle_msg_sendmsg(listener, arity, buf, rbuf);
-					} else if (!strncmp(tupletag, "bind", MAXATOMLEN)) {
-					ret = handle_msg_bind(listener, msg, buf, rbuf);
-					} else if (!strncmp(tupletag, "handlecall", MAXATOMLEN)) {
-					ret = handle_msg_handlecall(listener, msg, arity, buf, rbuf);
-					} else if (!strncmp(tupletag, "rex", MAXATOMLEN)) {
-					ret = handle_msg_rpcresponse(listener, msg, arity, buf, rbuf);
-					} else if (!strncmp(tupletag, "setevent", MAXATOMLEN)) {
-					ret = handle_msg_setevent(listener, msg, arity, buf, rbuf);
-					} else if (!strncmp(tupletag, "session_setevent", MAXATOMLEN)) {
-					ret = handle_msg_session_setevent(listener, msg, arity, buf, rbuf); */
+		} else if (!strncmp(tupletag, "nixevent", MAXATOMLEN)) {
+			ret = handle_msg_nixevent(listener, msg, arity, buf, rbuf);
+		/*
+		} else if (!strncmp(tupletag, "bind", MAXATOMLEN)) {
+			ret = handle_msg_bind(listener, msg, buf, rbuf);
+		}  else if (!strncmp(tupletag, "fetch_reply", MAXATOMLEN)) {
+			ret = handle_msg_fetch_reply(listener, buf, rbuf);
+		} else if (!strncmp(tupletag, "set_log_level", MAXATOMLEN)) {
+			ret = handle_msg_set_log_level(listener, arity, buf, rbuf);
+		} else if (!strncmp(tupletag, "session_event", MAXATOMLEN)) {
+			ret = handle_msg_session_event(listener, msg, arity, buf, rbuf);
+		} else if (!strncmp(tupletag, "session_nixevent", MAXATOMLEN)) {
+			ret = handle_msg_session_nixevent(listener, msg, arity, buf, rbuf);
+		} else if (!strncmp(tupletag, "api", MAXATOMLEN)) {
+			ret = handle_msg_api(listener, msg, arity, buf, rbuf);
+		} else if (!strncmp(tupletag, "bgapi", MAXATOMLEN)) {
+			ret = handle_msg_bgapi(listener, msg, arity, buf, rbuf);
+		} else if (!strncmp(tupletag, "sendevent", MAXATOMLEN)) {
+			ret = handle_msg_sendevent(listener, arity, buf, rbuf);
+		} else if (!strncmp(tupletag, "sendmsg", MAXATOMLEN)) {
+			ret = handle_msg_sendmsg(listener, arity, buf, rbuf);
+		} else if (!strncmp(tupletag, "handlecall", MAXATOMLEN)) {
+			ret = handle_msg_handlecall(listener, msg, arity, buf, rbuf);
+		} else if (!strncmp(tupletag, "rex", MAXATOMLEN)) {
+			ret = handle_msg_rpcresponse(listener, msg, arity, buf, rbuf);
+		} else if (!strncmp(tupletag, "setevent", MAXATOMLEN)) {
+			ret = handle_msg_setevent(listener, msg, arity, buf, rbuf);
+		} else if (!strncmp(tupletag, "session_setevent", MAXATOMLEN)) {
+			ret = handle_msg_session_setevent(listener, msg, arity, buf, rbuf); */
+		} else {
+			ei_x_encode_tuple_header(rbuf, 2);
+			ei_x_encode_atom(rbuf, "error");
+			ei_x_encode_atom(rbuf, "undef");
+		}
+	}
+
+	return ret;
+}
+
+static switch_status_t handle_msg_atom(listener_t *listener, erlang_msg * msg, ei_x_buff * buf, ei_x_buff * rbuf)
+{
+	char atom[MAXATOMLEN];
+	switch_status_t ret = SWITCH_STATUS_SUCCESS;
+
+	if (ei_decode_atom(buf->buff, &buf->index, atom)) {
+		ei_x_encode_tuple_header(rbuf, 2);
+		ei_x_encode_atom(rbuf, "error");
+		ei_x_encode_atom(rbuf, "badarg");
+	} else if (!strncmp(atom, "nolog", MAXATOMLEN)) {
+		/* TODO: remove loging bindings */
+		ei_x_encode_atom(rbuf, "ok");
+	} else if (!strncmp(atom, "register_log_handler", MAXATOMLEN)) {	
+		/* TODO: register log handler */
+		ei_x_encode_atom(rbuf, "ok");
+	} else if (!strncmp(atom, "register_event_handler", MAXATOMLEN)) {
+		/* TODO: register event handler */
+		ei_x_encode_atom(rbuf, "ok");
+	} else if (!strncmp(atom, "noevents", MAXATOMLEN)) {
+		remove_pid_from_event_bindings(listener, &msg->from);
+		ei_x_encode_atom(rbuf, "ok");
+	} else if (!strncmp(atom, "session_noevents", MAXATOMLEN)) {
+		/* TODO: remove all session bindings for pid */
+		ei_x_encode_atom(rbuf, "ok");
+	} else if (!strncmp(atom, "exit", MAXATOMLEN)) {
+		ei_x_encode_atom(rbuf, "ok");
+		ret = SWITCH_STATUS_TERM;
+	} else if (!strncmp(atom, "getpid", MAXATOMLEN)) {
+		ei_x_encode_tuple_header(rbuf, 2);
+		ei_x_encode_atom(rbuf, "ok");
+		ei_x_encode_pid(rbuf, ei_self(listener->ec));
+	} else if (!strncmp(atom, "link", MAXATOMLEN)) {
+		ei_link(listener, ei_self(listener->ec), &msg->from);
+		ret = SWITCH_STATUS_FALSE;
 	} else {
 		ei_x_encode_tuple_header(rbuf, 2);
 		ei_x_encode_atom(rbuf, "error");
 		ei_x_encode_atom(rbuf, "undef");
 	}
-	}
+
 	return ret;
 }
 
 /* fake enough of the net_kernel module to be able to respond to net_adm:ping */
-/* {'$gen_call', {<cpx@freecpx.128.0>, #Ref<254770.4.0>}, {is_auth, cpx@freecpx} */
 static switch_status_t handle_net_kernel_msg(listener_t *listener, erlang_msg * msg, ei_x_buff * buf, ei_x_buff * rbuf)
 {
 	int version, size, type, arity;
@@ -223,7 +298,6 @@ switch_status_t handle_msg(listener_t *listener, erlang_msg * msg, ei_x_buff * b
 	switch_status_t ret = SWITCH_STATUS_SUCCESS;
 
 	if (msg->msgtype == ERL_REG_SEND && !strncmp(msg->toname, "net_kernel", MAXATOMLEN)) {
-		/* try to respond to ping stuff */
 		ret = handle_net_kernel_msg(listener, msg, buf, rbuf);
 	} else {
 		buf->index = 0;
@@ -243,11 +317,11 @@ switch_status_t handle_msg(listener_t *listener, erlang_msg * msg, ei_x_buff * b
 						break;
 					case ERL_REFERENCE_EXT:
 					case ERL_NEW_REFERENCE_EXT:
-						//				ret = handle_ref_tuple(listener, msg, buf, rbuf);
+						//ret = handle_ref_tuple(listener, msg, buf, rbuf);
 						break;
 					default:
 						switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "Received unexpected erlang tuple, first element of type %d\n", type2);
-						/* some other kind of erlang term */
+						/* unexpected erlang tuple */
 						ei_x_encode_tuple_header(rbuf, 2);
 						ei_x_encode_atom(rbuf, "error");
 						ei_x_encode_atom(rbuf, "undef");
@@ -257,7 +331,7 @@ switch_status_t handle_msg(listener_t *listener, erlang_msg * msg, ei_x_buff * b
 				break;
 
 			case ERL_ATOM_EXT:
-				//			ret = handle_msg_atom(listener, msg, buf, rbuf);
+				ret = handle_msg_atom(listener, msg, buf, rbuf);
 				break;
 
 			default:

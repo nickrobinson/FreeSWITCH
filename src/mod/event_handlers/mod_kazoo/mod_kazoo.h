@@ -118,7 +118,13 @@ struct api_command_struct {
 };
 
 /* kazoo_binding.c */
+switch_status_t remove_pid_from_all_bindings(listener_t *listener, erlang_pid *from);
+
+switch_status_t has_event_bindings(listener_t *listener, switch_event_t *event);
+switch_status_t send_event_to_bindings(listener_t *listener, switch_event_t *event);
 switch_status_t add_event_binding(listener_t *listener, switch_event_types_t *type, erlang_pid *from);
+switch_status_t remove_pid_from_event_binding(listener_t *listener, switch_event_types_t *type, erlang_pid *from);
+switch_status_t remove_pid_from_event_bindings(listener_t *listener, erlang_pid *from);
 switch_status_t list_event_bindings(listener_t *listener);
 
 /* handle_msg.c */
@@ -138,7 +144,7 @@ int ei_compare_pids(erlang_pid * pid1, erlang_pid * pid2);
 int ei_decode_string_or_binary(char *buf, int *index, int maxlen, char *dst);
 switch_status_t initialize_ei(struct ei_cnode_s *ec, switch_sockaddr_t *sa, prefs_t *prefs );
 
-#define ei_encode_switch_event(_b, _e) ei_encode_switch_event_tag(_b, _e, "event")
+#define ei_encode_switch_event(_b, _e, _p) ei_encode_switch_event_tag(_b, _e, "event", _p)
 
 /* crazy macro for toggling encoding type */
 #define _ei_x_encode_string(buf, string) switch (prefs->encoding) { \
