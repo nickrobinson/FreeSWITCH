@@ -202,7 +202,8 @@ int ei_sendto(ei_cnode * ec, int fd, struct erlang_process *process, ei_x_buff *
 	return ret;
 }
 
-int ei_helper_send(listener_t *listener, erlang_pid* to, char* buf, int len) {
+int ei_helper_send(listener_t *listener, erlang_pid* to, char* buf, int len) 
+{
 	int ret = 0;
 
 	/* TODO: this isn't good enough, the fs_to_erl_loop might also try to write to the socket */
