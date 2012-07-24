@@ -787,6 +787,9 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_record_file(switch_core_session_t *se
 
 	}
 
+	// If 0, the recording likely stopped due to silence hits being depleted
+	switch_channel_set_variable_printf(channel, "silence_hits_left", "%d", fh->silence_hits);
+
 	switch_channel_set_variable_printf(channel, "record_samples", "%d", fh->samples_out);
 
 	if (switch_event_create(&event, SWITCH_EVENT_RECORD_STOP) == SWITCH_STATUS_SUCCESS) {
