@@ -1953,25 +1953,25 @@ static int sofia_dialog_probe_callback(void *pArg, int argc, char **argv, char *
 	tmp = switch_core_sprintf(h->pool, "%s"
 							  "<dialog id=\"%s\" call-id=\"%s\" local-tag=\"%s\" remote-tag=\"%s\" direction=\"%s\">\n"
 							  " <state>%s</state>\n"
-							  " <local>\n"
-							  "  <identity display=\"%s\">sip:%s@%s%s</identity>\n"
-							  "  <target uri=\"sip:%s@%s\">\n"
-							  "   <param pname=\"+sip.rendering\" pvalue=\"%s\"/>\n"
-							  "  </target>\n"
-							  " </local>\n"
-							  " <remote>\n"
-							  "  <identity display=\"%s\">sip:%s@%s</identity>\n"
-							  "  <target uri=\"%s\"/>\n"
-							  " </remote>\n"
+							  //" <local>\n"
+							  //"  <identity display=\"%s\">sip:%s@%s%s</identity>\n"
+							  //"  <target uri=\"sip:%s@%s\">\n"
+							  //"   <param pname=\"+sip.rendering\" pvalue=\"%s\"/>\n"
+							  //"  </target>\n"
+							  //" </local>\n"
+							  //" <remote>\n"
+							  //"  <identity display=\"%s\">sip:%s@%s</identity>\n"
+							  //"  <target uri=\"%s\"/>\n"
+							  //" </remote>\n"
 							  "</dialog>\n",
 							  data,
 							  uuid, call_id, to_tag, from_tag, direction,
-							  state,
-							  local_user, local_user, local_host, local_user_param,
-							  local_user, local_host,
-							  !strcasecmp(event_status, "hold") ? "no" : "yes",
-							  remote_display_buf, remote_user, remote_host,
-							  remote_uri
+							  state
+							  //local_user, local_user, local_host, local_user_param,
+							  //local_user, local_host,
+							  //!strcasecmp(event_status, "hold") ? "no" : "yes",
+							  //remote_display_buf, remote_user, remote_host,
+							  //remote_uri
 							  );
 	switch_core_hash_insert(h->hash, key, tmp);
 	switch_safe_free(buf_to_free);
