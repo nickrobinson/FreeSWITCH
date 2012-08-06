@@ -7618,7 +7618,7 @@ void sofia_handle_sip_i_refer(nua_t *nua, sofia_profile_t *profile, nua_handle_t
                                         switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Transferee-UUID", switch_channel_get_uuid(t_channel));
                                         switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Transferor-UUID", switch_channel_get_uuid(channel_a));
                                         switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Transferor-Direction", switch_channel_direction(channel_a) == SWITCH_CALL_DIRECTION_OUTBOUND ? "outbound" : "inbound");
-                                        switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Type", "ATTENDED_TRANSFER");
+                                        switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Type", "BLIND_TRANSFER");
                                         switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Refer", "%s@%s", exten, (char *) refer_to->r_url->url_host);
                                         switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Replaces", rep);
                                         switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, SOFIA_SIP_HEADER_PREFIX "Referred-By", full_ref_by);
