@@ -4,25 +4,25 @@
 #define MAX_MISSED 500
 #define MAX_PID_CHARS 255
 
-	typedef enum {
-		LFLAG_AUTHED = (1 << 0),
-		LFLAG_RUNNING = (1 << 1),
-		LFLAG_EVENTS = (1 << 2),
-		LFLAG_LOG = (1 << 3),
-		LFLAG_FULL = (1 << 4),
-		LFLAG_MYEVENTS = (1 << 5),
-		LFLAG_SESSION = (1 << 6),
-		LFLAG_ASYNC = (1 << 7),
-		LFLAG_STATEFUL = (1 << 8),
-		LFLAG_OUTBOUND = (1 << 9),
-		LFLAG_LINGER = (1 << 10),
-		LFLAG_HANDLE_DISCO = (1 << 11),
-		LFLAG_CONNECTED = (1 << 12),
-		LFLAG_RESUME = (1 << 13),
-		LFLAG_AUTH_EVENTS = (1 << 14),
-		LFLAG_ALL_EVENTS_AUTHED = (1 << 15),
-		LFLAG_ALLOW_LOG = (1 << 16)
-	} event_flag_t;
+typedef enum {
+	LFLAG_AUTHED = (1 << 0),
+	LFLAG_RUNNING = (1 << 1),
+	LFLAG_EVENTS = (1 << 2),
+	LFLAG_LOG = (1 << 3),
+	LFLAG_FULL = (1 << 4),
+	LFLAG_MYEVENTS = (1 << 5),
+	LFLAG_SESSION = (1 << 6),
+	LFLAG_ASYNC = (1 << 7),
+	LFLAG_STATEFUL = (1 << 8),
+	LFLAG_OUTBOUND = (1 << 9),
+	LFLAG_LINGER = (1 << 10),
+	LFLAG_HANDLE_DISCO = (1 << 11),
+	LFLAG_CONNECTED = (1 << 12),
+	LFLAG_RESUME = (1 << 13),
+	LFLAG_AUTH_EVENTS = (1 << 14),
+	LFLAG_ALL_EVENTS_AUTHED = (1 << 15),
+	LFLAG_ALLOW_LOG = (1 << 16)
+} event_flag_t;
 
 typedef enum {
 	ERLANG_STRING = 0,
