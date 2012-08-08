@@ -121,8 +121,6 @@ switch_status_t remove_pid_from_event_binding(listener_t *listener, switch_event
 
     event = switch_event_name(*type);
 
-    /* TODO: sort of locks!!! */
-
     if ((bindings = switch_core_hash_find(listener->event_bindings, event))) {
         erlang_pid *pid;
         char remove_key[MAX_PID_CHARS];
@@ -146,8 +144,6 @@ switch_status_t remove_pid_from_event_bindings(listener_t *listener, erlang_pid 
     char remove_key[MAX_PID_CHARS];
 
     switch_snprintf(remove_key, sizeof(remove_key), "<%d.%d.%d>", from->creation, from->num, from->serial);
-    
-    /* TODO: sort out locks!!! */
 
     /* loop over all event_bindings removing the pid from the hash found as the value */
     for (events = switch_hash_first(NULL, listener->event_bindings); events; events = switch_hash_next(events)) {
@@ -181,8 +177,6 @@ SWITCH_HASH_DELETE_FUNC(event_bindings_cleanup_callback)
 switch_status_t flush_event_bindings(listener_t *listener) {
     switch_hash_index_t *events;
     switch_hash_t *bindings;
-    
-    /* TODO: sort out locks!!! */
 
     /* loop over all event_bindings removing all hashes */
     for (events = switch_hash_first(NULL, listener->event_bindings); events; events = switch_hash_next(events)) {
@@ -207,9 +201,8 @@ switch_status_t flush_event_bindings(listener_t *listener) {
 
 switch_status_t list_event_bindings(listener_t *listener) {
     switch_hash_index_t *events, *binding;
-    switch_hash_t *bindings;    
+    switch_hash_t *bindings;
 
-    /* TODO: sort out locks!!! */
     for (events = switch_hash_first(NULL, listener->event_bindings); events; events = switch_hash_next(events)) {        
         const void *key1;
         void *value1;        
