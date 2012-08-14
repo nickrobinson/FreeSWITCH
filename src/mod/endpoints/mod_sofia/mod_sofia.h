@@ -91,6 +91,9 @@ typedef struct private_object private_object_t;
 #define MY_EVENT_RECOVERY "sofia::recovery_recv"
 #define MY_EVENT_RECOVERY_SEND "sofia::recovery_send"
 #define MY_EVENT_RECOVERY_RECOVERED "sofia::recovery_recovered"
+#define MY_EVENT_MOVE_REQUEST "sofia::move_request"
+#define MY_EVENT_MOVE_RELEASED "sofia::move_released"
+#define MY_EVENT_MOVE_COMPLETE "sofia::move_complete"
 #define MY_EVENT_ERROR "sofia::error"
 #define MY_EVENT_REFER_TRANSFER "sofia::transfer"
 
@@ -1162,6 +1165,8 @@ void sofia_update_callee_id(switch_core_session_t *session, sofia_profile_t *pro
 void sofia_send_callee_id(switch_core_session_t *session, const char *name, const char *number);
 int sofia_sla_supported(sip_t const *sip);
 int sofia_glue_recover(switch_bool_t flush);
+void sofia_glue_move_request_event_handler(switch_event_t *event);
+// int sofia_glue_move_channel(char *sofia_profile_name, char *channel_id, switch_bool_t new_node);
 int sofia_glue_profile_recover(sofia_profile_t *profile, switch_bool_t flush);
 void sofia_profile_destroy(sofia_profile_t *profile);
 switch_status_t sip_dig_function(_In_opt_z_ const char *cmd, _In_opt_ switch_core_session_t *session, _In_ switch_stream_handle_t *stream);
