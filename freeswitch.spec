@@ -1473,20 +1473,6 @@ cd libs/esl
 %{__mkdir} -p %{buildroot}%{logfiledir}
 %{__mkdir} -p %{buildroot}%{runtimedir}
 
-#install the esl stuff
-cd libs/esl
-%{__make} DESTDIR=%{buildroot} pymod-install
-
-%if %{build_py26_esl}
-#install esl for python 26
-%{__make} clean
-sed -i s/python\ /python26\ /g python/Makefile
-%{__make} pymod
-%{__mkdir} -p %{buildroot}/usr/lib/python2.6/site-packages
-%{__make} DESTDIR=%{buildroot} pymod-install
-%endif
-
-cd ../..
 
 %ifos linux
 # Install init files
