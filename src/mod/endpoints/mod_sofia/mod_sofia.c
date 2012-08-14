@@ -4196,6 +4196,68 @@ SWITCH_STANDARD_API(sofia_gateway_data_function)
 	return SWITCH_STATUS_SUCCESS;
 }
 
+/*
+SWITCH_STANDARD_API(sofia_channel_move)
+{
+	char *argv[2];
+	char *mydata;
+	int argc;
+	char *profilename, *channel_id;
+	int new_node = SWITCH_FALSE;
+	switch_event_t *event = NULL;
+	int move_result;
+
+	if (zstr(cmd)) {
+		stream->write_function(stream, "-ERR Parameter missing\n");
+		return SWITCH_STATUS_SUCCESS;
+	}
+	if (!(mydata = strdup(cmd))) {
+		return SWITCH_STATUS_FALSE;
+	}
+
+	if (!(argc = switch_separate_string(mydata, ' ', argv, (sizeof(argv) / sizeof(argv[0])))) || !argv[0]) {
+		goto end;
+	}
+
+	profilename = argv[0];
+	channel_id = argv[1];
+
+	if (zstr(profilename) || zstr(channel_id)) {
+		goto end;
+	}
+
+	if (!strcasecmp(argv[2], "new_node")) {
+		new_node = SWITCH_TRUE;
+	}
+
+	move_result = sofia_glue_move_channel(profilename, channel_id, new_node);
+
+	if (move_result) {
+		if (switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM,
+			MY_EVENT_RECOVERY_RECOVERED) == SWITCH_STATUS_SUCCESS) {
+			switch_event_add_header(event, SWITCH_STACK_BOTTOM, "recover_single_channel_uuid", "%s", channel_id);
+			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "recover_single_channel_status", "success");
+			switch_event_fire(&event);
+		}
+
+		stream->write_function(stream, "Recovered %d call(s)\n", move_result);
+	} else {
+		if (switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM,
+			MY_EVENT_RECOVERY_RECOVERED) == SWITCH_STATUS_SUCCESS) {
+			switch_event_add_header(event, SWITCH_STACK_BOTTOM, "recover_single_channel_uuid", "%s", channel_id);
+			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "recover_single_channel_status", "failed");
+			switch_event_fire(&event);
+		}
+
+		stream->write_function(stream, "No calls to recover.\n");
+	}
+
+end:
+
+	return SWITCH_STATUS_SUCCESS;
+}
+*/
+
 SWITCH_STANDARD_API(sofia_function)
 {
 	char *argv[1024] = { 0 };
@@ -5596,6 +5658,12 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_sofia_load)
 		return SWITCH_STATUS_GENERR;
 	}
 
+	if (switch_event_bind(modname, SWITCH_EVENT_CUSTOM, MY_EVENT_MOVE_REQUEST, sofia_glue_move_request_event_handler, NULL) != SWITCH_STATUS_SUCCESS) {
+
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Couldn't bind!\n");
+		return SWITCH_STATUS_GENERR;
+	}
+
 	if (switch_event_bind(modname, SWITCH_EVENT_TRAP, SWITCH_EVENT_SUBCLASS_ANY, general_event_handler, NULL) != SWITCH_STATUS_SUCCESS) {
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Couldn't bind!\n");
 		return SWITCH_STATUS_GENERR;
@@ -5632,6 +5700,7 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_sofia_load)
 
 
 	SWITCH_ADD_API(api_interface, "sofia", "Sofia Controls", sofia_function, "<cmd> <args>");
+//	SWITCH_ADD_API(api_interface, "sofia_channel_move", "Move a channel to another media node without destroying it", sofia_channel_move, "<profile_name> <uuid> <new_node|old_node>");
 	SWITCH_ADD_API(api_interface, "sofia_gateway_data", "Get data from a sofia gateway", sofia_gateway_data_function,
 				   "<gateway_name> [ivar|ovar|var] <name>");
 	switch_console_set_complete("add sofia help");
