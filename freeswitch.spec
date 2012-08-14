@@ -1281,7 +1281,7 @@ APPLICATION_MODULES_AC="applications/mod_commands applications/mod_conference ap
 APPLICATION_MODULES_DE="applications/mod_dptools applications/mod_esf applications/mod_expr "
 
 %if %{build_mod_esl}
-APPLICATION_MODULES_DE+="applications/mod_esl"
+APPLICATION_MODULES_DE+=""
 %endif
 
 APPLICATION_MODULES_FR="applications/mod_fsv applications/mod_http_cache"
