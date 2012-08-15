@@ -5721,17 +5721,22 @@ static int recover_callback(void *pArg, int argc, char **argv, char **columnName
 
 	xml = switch_xml_parse_str_dynamic(argv[3], SWITCH_TRUE);
 
-	if (!xml)
+	if (!xml) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Invalid xml string, call not recovered\n");
+		switch_xml_free(xml);
 		return 0;
+	}
 
 	if (!(session = switch_core_session_request_xml(sofia_endpoint_interface, NULL, xml))) {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Invalid cdr data, call not recovered\n");
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Invalid xml data, call not recovered\n");
+		switch_xml_free(xml);
 		return 0;
 	}
 
 	if (!(tech_pvt = (private_object_t *) switch_core_session_alloc(session, sizeof(private_object_t)))) {
 		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_CRIT, "Hey where is my memory pool?\n");
 		switch_core_session_destroy(&session);
+		switch_xml_free(xml);
 		return 0;
 	}
 
@@ -5965,8 +5970,7 @@ static int recover_callback(void *pArg, int argc, char **argv, char **columnName
 
 	h->total++;
 
-	return 0;
-
+	return 1;
 }
 
 
@@ -5974,7 +5978,7 @@ static int recover_callback(void *pArg, int argc, char **argv, char **columnName
 void sofia_glue_move_restore_channel(sofia_profile_t *profile, char *xml_cdr_text)
 {
 	struct recover_helper h = { 0 };
-        char *fake_arguments[4];
+	char *fake_arguments[4];
 
 	h.profile = profile;
 	h.total = 1;
@@ -5983,9 +5987,11 @@ void sofia_glue_move_restore_channel(sofia_profile_t *profile, char *xml_cdr_tex
 
 	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Attempting to restore channel with metadata:\n%s\n", xml_cdr_text);
 
-	recover_callback(&h, 0, fake_arguments, NULL);
-
-	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Restore complete\n");
+	if (recover_callback(&h, 0, fake_arguments, NULL)) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Restore complete\n");
+	} else {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Restore failed\n");
+	}
 
 /*	switch_event_t *event = NULL;
 

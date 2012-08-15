@@ -1608,9 +1608,12 @@ SWITCH_DECLARE(switch_core_session_t *) switch_core_session_request_xml(switch_e
 
 	if ((tag = switch_xml_child(xml, "channel_data"))) {
 		direction_s = xml_find_var(tag, "direction");
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "call direction is %s\n", direction_s);	
 		direction = !strcmp(direction_s, "outbound") ? SWITCH_CALL_DIRECTION_OUTBOUND : SWITCH_CALL_DIRECTION_INBOUND;
 		flag_str = xml_find_var(tag, "flags");
 		cap_str = xml_find_var(tag, "caps");
+	} else {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "no channel data\n");	
 	}
 
 	parse_array(flag_str, flags, CF_FLAG_MAX);
@@ -1673,8 +1676,13 @@ SWITCH_DECLARE(switch_core_session_t *) switch_core_session_request_xml(switch_e
 	flags[CF_SIMPLIFY] = 0;
 
 
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "got here\n");
+
 	if (!(session = switch_core_session_request_uuid(endpoint_interface, direction, SOF_NO_LIMITS, pool, uuid))) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "request_uuid failed\n");
 		return NULL;
+	} else {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "session created with uuid %s\n", uuid);
 	}
 
 	channel = switch_core_session_get_channel(session);
@@ -1692,6 +1700,7 @@ SWITCH_DECLARE(switch_core_session_t *) switch_core_session_request_xml(switch_e
 	}
 
 	if ((tag2 = switch_xml_child(xml, "variables"))) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "xml has variables child\n");
 		for (tag = tag2->child; tag; tag = tag->sibling) {
 			if (tag->name && tag->txt) {
 				char *p = strdup(tag->txt);
@@ -1705,7 +1714,7 @@ SWITCH_DECLARE(switch_core_session_t *) switch_core_session_request_xml(switch_e
 			}
 		}
 	}
-	
+
 	if ((callflow = switch_xml_child(xml, "callflow"))) {
 		if ((tag2 = switch_xml_child(callflow, "caller_profile"))) {
 			switch_caller_profile_t *caller_profile;
@@ -1721,7 +1730,8 @@ SWITCH_DECLARE(switch_core_session_t *) switch_core_session_request_xml(switch_e
 													   xml_find_var(tag2, "aniii"),
 													   xml_find_var(tag2, "rdnis"),
 													   xml_find_var(tag2, "source"),
-													   xml_find_var(tag2, "context"), xml_find_var(tag2, "destination_number"));
+													   xml_find_var(tag2, "context"),
+													   xml_find_var(tag2, "destination_number"));
 
 			if ((tmp = xml_find_var(tag2, "callee_id_name"))) {
 				caller_profile->callee_id_name = switch_core_session_strdup(session, tmp);
@@ -1796,17 +1806,15 @@ SWITCH_DECLARE(switch_core_session_t *) switch_core_session_request_xml(switch_e
 
 		}
 
-
 		switch_channel_set_flag(channel, CF_RECOVERED);
 	}
 
-
 	if (!channel || !switch_channel_get_caller_profile(channel)) {
 		if (session) {
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "destroying session\n");
 			switch_core_session_destroy(&session);
 		}
 	}
-
 
 	return session;
 }
@@ -1847,6 +1855,7 @@ SWITCH_DECLARE(switch_core_session_t *) switch_core_session_request_uuid(switch_
 	}
 
 	if (runtime.min_idle_time > 0 && runtime.profile_time < runtime.min_idle_time) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "min_idle_time > 0 and profile_time < min_idle_time\n");
 		return NULL;
 	}
 
@@ -1885,6 +1894,7 @@ SWITCH_DECLARE(switch_core_session_t *) switch_core_session_request_uuid(switch_
 	switch_core_memory_pool_set_data(session->pool, "__session", session);
 
 	if (switch_channel_alloc(&session->channel, direction, session->pool) != SWITCH_STATUS_SUCCESS) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "abort!\n");
 		abort();
 	}
 
