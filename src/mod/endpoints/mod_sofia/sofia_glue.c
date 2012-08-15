@@ -5787,6 +5787,25 @@ int sofia_recover_callback(switch_core_session_t *session)
 
 	if (!(profile = sofia_glue_find_profile(profile_name))) {
 		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_CRIT, "Invalid profile %s\n", profile_name);
+
+	xml = switch_xml_parse_str_dynamic(argv[3], SWITCH_TRUE);
+
+	if (!xml) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Invalid xml string, call not recovered\n");
+		switch_xml_free(xml);
+		return 0;
+	}
+
+	if (!(session = switch_core_session_request_xml(sofia_endpoint_interface, NULL, xml))) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Invalid xml data, call not recovered\n");
+		switch_xml_free(xml);
+		return 0;
+	}
+
+	if (!(tech_pvt = (private_object_t *) switch_core_session_alloc(session, sizeof(private_object_t)))) {
+		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_CRIT, "Hey where is my memory pool?\n");
+		switch_core_session_destroy(&session);
+		switch_xml_free(xml);
 		return 0;
 	}
 
@@ -5992,8 +6011,7 @@ int sofia_recover_callback(switch_core_session_t *session)
 
  end:
 
-	return r;
-
+	return 1;
 }
 
 
@@ -6001,7 +6019,7 @@ int sofia_recover_callback(switch_core_session_t *session)
 void sofia_glue_move_restore_channel(sofia_profile_t *profile, char *xml_cdr_text)
 {
 	struct recover_helper h = { 0 };
-        char *fake_arguments[4];
+	char *fake_arguments[4];
 
 	h.profile = profile;
 	h.total = 1;
@@ -6010,9 +6028,11 @@ void sofia_glue_move_restore_channel(sofia_profile_t *profile, char *xml_cdr_tex
 
 	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Attempting to restore channel with metadata:\n%s\n", xml_cdr_text);
 
-	recover_callback(&h, 0, fake_arguments, NULL);
-
-	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Restore complete\n");
+	if (recover_callback(&h, 0, fake_arguments, NULL)) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Restore complete\n");
+	} else {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Restore failed\n");
+	}
 
 /*	switch_event_t *event = NULL;
 
