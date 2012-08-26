@@ -1892,10 +1892,12 @@ SWITCH_DECLARE(switch_core_session_t *) switch_core_session_request_xml(switch_e
 	}
 
 	if ((callflow = switch_xml_child(xml, "callflow"))) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "xml has a callflow\n");
 		if ((tag2 = switch_xml_child(callflow, "caller_profile"))) {
 			switch_caller_profile_t *caller_profile;
 			char *tmp;
 
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "xml has a caller_profile\n");
 			caller_profile = switch_caller_profile_new(switch_core_session_get_pool(session),
 													   xml_find_var(tag2, "username"),
 													   xml_find_var(tag2, "dialplan"),
@@ -1918,6 +1920,7 @@ SWITCH_DECLARE(switch_core_session_t *) switch_core_session_request_xml(switch_e
 			}
 
 			if ((tag3 = switch_xml_child(callflow, "times"))) {
+				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "xml has call times\n");
 				caller_profile->times = (switch_channel_timetable_t *) switch_core_session_alloc(session, sizeof(*caller_profile->times));
 
 				caller_profile->times->resurrected = switch_time_now();
@@ -1949,6 +1952,7 @@ SWITCH_DECLARE(switch_core_session_t *) switch_core_session_request_xml(switch_e
 
 			switch_channel_set_caller_profile(channel, caller_profile);
 			if ((tag = switch_xml_child(tag2, "originator")) && (tag = tag->child)) {
+				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "xml has originator info\n");
 				caller_profile = switch_caller_profile_new(switch_core_session_get_pool(session),
 														   xml_find_var(tag, "username"),
 														   xml_find_var(tag, "dialplan"),
@@ -1965,6 +1969,7 @@ SWITCH_DECLARE(switch_core_session_t *) switch_core_session_request_xml(switch_e
 			}
 
 			if ((tag = switch_xml_child(tag2, "originatee")) && (tag = tag->child)) {
+				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "xml has originatee info\n");
 				caller_profile = switch_caller_profile_new(switch_core_session_get_pool(session),
 														   xml_find_var(tag, "username"),
 														   xml_find_var(tag, "dialplan"),
