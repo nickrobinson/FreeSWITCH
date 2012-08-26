@@ -6047,6 +6047,10 @@ void sofia_glue_move_restore_channel(sofia_profile_t *profile, char *xml_cdr_tex
 	}*/
 }
 
+typedef enum {
+        OCF_HANGUP = (1 << 0)
+} opaque_channel_flag_t;
+
 // Kill a channel and create an event with all the metadata about the channel so that it can be recovered on another box
 void sofia_glue_move_release_channel(sofia_profile_t *profile, switch_core_session_t *session)
 {
