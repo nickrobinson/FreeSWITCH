@@ -5797,7 +5797,7 @@ int sofia_recover_callback(switch_core_session_t *session)
 	}
 
 	if (!(session = switch_core_session_request_xml(sofia_endpoint_interface, NULL, xml))) {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Invalid xml data, call not recovered\n");
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Invalid xml data, call not recovered. XML was:\n%s\n", argv[3]);
 		switch_xml_free(xml);
 		return 0;
 	}
