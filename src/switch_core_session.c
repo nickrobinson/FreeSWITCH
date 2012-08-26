@@ -1715,6 +1715,7 @@ SWITCH_DECLARE(switch_core_session_t *) switch_core_session_request_xml(switch_e
 		}
 	}
 
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Do we haz callflow?\n%s\n", xml);
 	if ((callflow = switch_xml_child(xml, "callflow"))) {
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "xml has a callflow\n");
 		if ((tag2 = switch_xml_child(callflow, "caller_profile"))) {
