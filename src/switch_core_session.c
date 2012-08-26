@@ -1883,6 +1883,7 @@ SWITCH_DECLARE(switch_core_session_t *) switch_core_session_request_xml(switch_e
 				char *val = p;
 				switch_url_decode(val);
 				switch_channel_set_variable(channel, tag->name, val);
+				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "variables - %s = %s\n", tag->name, val);
 				if (!strcasecmp(tag->name, "channel_name")) {
 					switch_channel_set_name(channel, val);
 				}
@@ -1891,7 +1892,6 @@ SWITCH_DECLARE(switch_core_session_t *) switch_core_session_request_xml(switch_e
 		}
 	}
 
-	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Do we haz callflow?\n%s\n", xml);
 	if ((callflow = switch_xml_child(xml, "callflow"))) {
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "xml has a callflow\n");
 		if ((tag2 = switch_xml_child(callflow, "caller_profile"))) {
