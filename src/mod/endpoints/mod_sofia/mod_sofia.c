@@ -646,7 +646,6 @@ switch_status_t sofia_on_hangup(switch_core_session_t *session)
 		switch_safe_free(bye_headers);
 	}
 
-done:
 	sofia_clear_flag(tech_pvt, TFLAG_IO);
 
 	if (tech_pvt->sofia_private) {
@@ -656,6 +655,7 @@ done:
 
 	sofia_glue_set_rtp_stats(tech_pvt);
 
+done:
 	switch_mutex_unlock(tech_pvt->sofia_mutex);
 
 	return SWITCH_STATUS_SUCCESS;
