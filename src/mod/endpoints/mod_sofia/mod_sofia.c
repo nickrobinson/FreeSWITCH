@@ -129,7 +129,7 @@ static switch_status_t sofia_on_init(switch_core_session_t *session)
 
 				/* Tell the world about the channel, hoping that the call shall resume */
 				if (switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, MY_EVENT_MOVE_COMPLETE) == SWITCH_STATUS_SUCCESS) {
-					switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "old_node_channel_id", switch_channel_get_uuid(channel));
+					switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "old_node_channel_uuid", switch_channel_get_uuid(channel));
 					switch_event_fire(&event);
 				}
 			}
