@@ -6015,7 +6015,7 @@ int sofia_recover_callback(switch_core_session_t *session)
 }
 
 
-// Restore a specific channel where we have metadata for it
+/* Restore a specific channel where we have metadata for it */
 void sofia_glue_move_restore_channel(sofia_profile_t *profile, char *xml_cdr_text)
 {
 	struct recover_helper h = { 0 };
@@ -6047,16 +6047,20 @@ void sofia_glue_move_restore_channel(sofia_profile_t *profile, char *xml_cdr_tex
 	}*/
 }
 
-typedef enum {
-        OCF_HANGUP = (1 << 0)
-} opaque_channel_flag_t;
-
-// Kill a channel and create an event with all the metadata about the channel so that it can be recovered on another box
+/* Kill a channel and create an event with all the metadata about the channel so that it can be recovered on another box */
 void sofia_glue_move_release_channel(sofia_profile_t *profile, switch_core_session_t *session)
 {
-//	private_object_t *tech_pvt = (private_object_t *) switch_core_session_get_private(session);
 	switch_xml_t cdr = NULL;
 	char *xml_cdr_text = NULL;
+        switch_channel_t *channel;
+
+	/* Mark channel as in the "moving" state */
+	channel = switch_core_session_get_channel(session);
+	if (!channel) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "This session has no channel?\n");
+		return;
+	}
+	switch_channel_set_variable(channel, "channel_is_moving", "true");
 
 	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Generating XML metadata...\n");
 
@@ -6067,9 +6071,8 @@ void sofia_glue_move_release_channel(sofia_profile_t *profile, switch_core_sessi
 
 	if (xml_cdr_text) {
 		switch_event_t *event = NULL;
-	        switch_channel_t *channel;
 
-		// Tell the world about the channel, hoping that someone will pick it up
+		/* Tell the world about the channel, hoping that someone will pick it up */
 		if (switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, MY_EVENT_MOVE_RELEASED) == SWITCH_STATUS_SUCCESS) {
 			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "profile_name", profile->name);
 			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "old_node_hostname", mod_sofia_globals.hostname);
@@ -6080,25 +6083,18 @@ void sofia_glue_move_release_channel(sofia_profile_t *profile, switch_core_sessi
 		
 		free(xml_cdr_text);
 
+		/* So long and thanks for all the phish */
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Quietly killing channel...\n");
-
-
-		// Kill channel silently
-		channel = switch_core_session_get_channel(session);
-		// switch_channel_set_state(channel, CS_HANGUP);
-		// switch_channel_set_state(channel, CS_REPORTING);
-		switch_channel_set_variable(channel, "kill_channel_silently", "true");
 	        switch_channel_hangup(channel, SWITCH_CAUSE_REDIRECTION_TO_NEW_DESTINATION);
-
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Channel is moving!\n");
 	}
 	
 }
 
 
-// Move a channel - either for to the current node.
-// If from, output metadata about the node as an event and kill it silently
-// If to, receive metadata about the node in an event and attempt to recover/restore it with a new hostname
+/* Move a channel - either for to the current node.
+ If from, output metadata about the node as an event and kill it silently
+ If to, receive metadata about the node in an event and attempt to recover/restore it with a new hostname */
 /*int sofia_glue_move_request_event_handler(char *sofia_profile_name, char *channel_id, switch_bool_t new_node)
 {
 	sofia_profile_t *profile;
@@ -6117,15 +6113,15 @@ void sofia_glue_move_release_channel(sofia_profile_t *profile, switch_core_sessi
 
 
 
-// Received a request to move a channel (either to or from)
-// If to this box, will require metadata and will send an event on successful restoration
-// If from this box, will require a channel ID and will send an event containing metadata on successful destroy
+/* Received a request to move a channel (either to or from)
+   If to this box, will require metadata and will send an event on successful restoration
+   If from this box, will require a channel ID and will send an event containing metadata on successful destroy */
 void sofia_glue_move_request_event_handler(switch_event_t *event)
 {
-	char *buf = NULL;		// was *sql
+	char *buf = NULL;		
 	char *profile_name = NULL;
 
-	switch_assert(event);		// Just a sanity check
+	switch_assert(event);		
 
 	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Request to move a channel, deciding if this is new node or old node...\n");
 	if ((buf = switch_event_get_header(event, "metadata")) && (profile_name = switch_event_get_header(event, "profile_name"))) {
@@ -6201,6 +6197,107 @@ int sofia_glue_profile_recover(sofia_profile_t *profile, switch_bool_t flush)
 	return r;
 }
 
+void sofia_glue_track_event_handler(switch_event_t *event)
+{
+	char *sql, *buf = NULL;
+	char *profile_name = NULL;
+
+	switch_assert(event);		
+
+	if ((buf = switch_event_get_header_nil(event, "sql")) && (profile_name = switch_event_get_header_nil(event, "profile_name"))) {
+		sofia_profile_t *profile;
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "%s\n", switch_event_get_header_nil(event, "Event-Calling-Function"));
+		if ((profile = sofia_glue_find_profile(profile_name))) {
+			sql = switch_mprintf("%s", buf);
+			sofia_glue_execute_sql_now(profile, &sql, SWITCH_TRUE);
+			sofia_glue_release_profile(profile);
+		}
+	}
+
+	return;
+}
+void sofia_glue_tech_untrack(sofia_profile_t *profile, switch_core_session_t *session, switch_bool_t force)
+{
+	char *sql = NULL;
+	private_object_t *tech_pvt = (private_object_t *) switch_core_session_get_private(session);
+
+	if (!sofia_test_pflag(profile, PFLAG_TRACK_CALLS) || (sofia_test_flag(tech_pvt, TFLAG_RECOVERING))) {
+		return;
+	}
+
+	if (sofia_test_pflag(profile, PFLAG_TRACK_CALLS) && (sofia_test_flag(tech_pvt, TFLAG_TRACKED) || force)) {
+		switch_event_t *event = NULL;
+
+		if (force) {
+			sql = switch_mprintf("delete from sip_recovery where uuid='%q'", switch_core_session_get_uuid(session));
+			
+		} else {
+			sql = switch_mprintf("delete from sip_recovery where runtime_uuid='%q' and uuid='%q'",
+								 switch_core_get_uuid(), switch_core_session_get_uuid(session));
+		}
+
+		if (sofia_test_pflag(profile, PFLAG_TRACK_CALLS_EVENTS)) {
+			if (switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, MY_EVENT_RECOVERY_SEND) == SWITCH_STATUS_SUCCESS) {
+				switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "profile_name", profile->name);
+				switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "sql", sql);
+				switch_event_fire(&event);
+			}
+		}
+		
+		sofia_glue_execute_sql(profile, &sql, SWITCH_TRUE);
+		sofia_clear_flag(tech_pvt, TFLAG_TRACKED);
+		
+		switch_safe_free(sql);
+	}
+	
+
+}
+
+void sofia_glue_tech_track(sofia_profile_t *profile, switch_core_session_t *session)
+{
+	private_object_t *tech_pvt = (private_object_t *) switch_core_session_get_private(session);
+	switch_xml_t cdr = NULL;
+	char *xml_cdr_text = NULL;
+	char *sql = NULL;
+
+	if (!sofia_test_pflag(profile, PFLAG_TRACK_CALLS) || sofia_test_flag(tech_pvt, TFLAG_RECOVERING)) {
+		return;
+	}
+
+	if (switch_ivr_generate_xml_cdr(session, &cdr) == SWITCH_STATUS_SUCCESS) {
+		xml_cdr_text = switch_xml_toxml_nolock(cdr, SWITCH_FALSE);
+		switch_xml_free(cdr);
+	}
+
+	if (xml_cdr_text) {
+		if (sofia_test_flag(tech_pvt, TFLAG_TRACKED)) {
+			sql = switch_mprintf("update sip_recovery set metadata='%q' where uuid='%q'",  xml_cdr_text, switch_core_session_get_uuid(session));
+		} else {
+			
+			sql = switch_mprintf("insert into sip_recovery (runtime_uuid, profile_name, hostname, uuid, metadata) values ('%q','%q','%q','%q','%q')",
+								 switch_core_get_uuid(), profile->name, mod_sofia_globals.hostname, switch_core_session_get_uuid(session), xml_cdr_text);
+		}
+
+		if (sofia_test_pflag(profile, PFLAG_TRACK_CALLS_EVENTS)) {
+			switch_event_t *event = NULL;
+			if (switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, MY_EVENT_RECOVERY_SEND) == SWITCH_STATUS_SUCCESS) {
+				switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "profile_name", profile->name);
+				switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "sql", sql);
+				switch_event_fire(&event);
+			}
+		}
+
+		sofia_glue_execute_sql(profile, &sql, SWITCH_TRUE);
+		
+		free(xml_cdr_text);
+		sofia_set_flag(tech_pvt, TFLAG_TRACKED);
+		
+	}
+	
+	
+	switch_safe_free(sql);
+
+}
 
 int sofia_glue_init_sql(sofia_profile_t *profile)
 {
