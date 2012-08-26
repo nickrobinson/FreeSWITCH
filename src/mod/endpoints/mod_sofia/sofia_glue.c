@@ -6044,10 +6044,10 @@ void sofia_glue_move_release_channel(sofia_profile_t *profile, switch_core_sessi
 
 		// Kill channel silently
 		channel = switch_core_session_get_channel(session);
-	        //switch_channel_hangup(channel, SWITCH_CAUSE_REDIRECTION_TO_NEW_DESTINATION);
 		// switch_channel_set_state(channel, CS_HANGUP);
 		// switch_channel_set_state(channel, CS_REPORTING);
 		switch_channel_set_variable(channel, "kill_channel_silently", "true");
+	        switch_channel_hangup(channel, SWITCH_CAUSE_REDIRECTION_TO_NEW_DESTINATION);
 
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Channel is moving!\n");
 	}
