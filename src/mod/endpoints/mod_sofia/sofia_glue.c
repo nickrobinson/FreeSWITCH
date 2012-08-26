@@ -6022,7 +6022,10 @@ void sofia_glue_move_release_channel(sofia_profile_t *profile, switch_core_sessi
 
 	if (xml_cdr_text) {
 		switch_event_t *event = NULL;
-	        switch_channel_t *channel;
+//	        switch_channel_t *channel;
+		private_object_t *tech_pvt = (private_object_t *) switch_core_session_get_private(session);
+
+		switch_assert(tech_pvt != NULL);
 
 		// Tell the world about the channel, hoping that someone will pick it up
 		if (switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, MY_EVENT_MOVE_RELEASED) == SWITCH_STATUS_SUCCESS) {
@@ -6038,8 +6041,11 @@ void sofia_glue_move_release_channel(sofia_profile_t *profile, switch_core_sessi
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Quietly killing channel...\n");
 
 		// Kill channel silently
-		channel = switch_core_session_get_channel(session);
-	        switch_channel_hangup(channel, SWITCH_CAUSE_REDIRECTION_TO_NEW_DESTINATION);
+		//channel = switch_core_session_get_channel(session);
+	        //switch_channel_hangup(channel, SWITCH_CAUSE_REDIRECTION_TO_NEW_DESTINATION);
+		switch_mutex_lock(tech_pvt->sofia_mutex);
+		sofia_set_flag(tech_pvt, TFLAG_BYE)
+		switch_mutex_unlock(tech_pvt->sofia_mutex);
 
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Channel is moving!\n");
 	}
