@@ -6000,7 +6000,7 @@ void sofia_glue_move_restore_channel(sofia_profile_t *profile, char *xml_cdr_tex
 		switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "profile_name", profile->name);
 		switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "new_node_runtime_uuid", switch_core_get_uuid());
 		switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "new_node_hostname", mod_sofia_globals.hostname);
-		switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "new_node_session_uuid", switch_core_session_get_uuid(session));
+		switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "new_node_channel_uuid", switch_core_session_get_uuid(session));
 		switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "metadata", xml_cdr_text);
 		switch_event_fire(&event);
 	}*/
@@ -6035,7 +6035,7 @@ void sofia_glue_move_release_channel(sofia_profile_t *profile, switch_core_sessi
 		if (switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, MY_EVENT_MOVE_RELEASED) == SWITCH_STATUS_SUCCESS) {
 			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "profile_name", profile->name);
 			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "old_node_hostname", mod_sofia_globals.hostname);
-			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "old_node_session_uuid", switch_core_session_get_uuid(session));
+			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "old_node_channel_uuid", switch_core_session_get_uuid(session));
 			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "metadata", xml_cdr_text);
 			switch_event_fire(&event);
 		}
