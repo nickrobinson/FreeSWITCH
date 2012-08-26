@@ -121,9 +121,17 @@ static switch_status_t sofia_on_init(switch_core_session_t *session)
 	} else {
 		if (sofia_test_flag(tech_pvt, TFLAG_RECOVERING)) {
 			if (switch_true(switch_channel_get_variable(channel, "channel_is_moving"))) {
+				switch_event_t *event = NULL;
+
+				/* Mark channel as no longer moving */
 				switch_channel_set_variable(channel, "channel_is_moving", NULL);
 				switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "Channel is done moving\n");
 
+				/* Tell the world about the channel, hoping that the call shall resume */
+				if (switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, MY_EVENT_MOVE_COMPLETE) == SWITCH_STATUS_SUCCESS) {
+					switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Channel-ID", switch_channel_get_uuid(channel));
+					switch_event_fire(&event);
+				}
 			}
 			switch_channel_set_state(channel, CS_EXECUTE);
 		} else {
