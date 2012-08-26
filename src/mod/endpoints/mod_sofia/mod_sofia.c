@@ -119,6 +119,11 @@ static switch_status_t sofia_on_init(switch_core_session_t *session)
 		switch_channel_set_state(channel, CS_RESET);
 	} else {
 		if (sofia_test_flag(tech_pvt, TFLAG_RECOVERING)) {
+			if (switch_true(switch_channel_get_variable(channel, "channel_is_moving"))) {
+				switch_channel_set_variable(channel, "channel_is_moving", NULL);
+				switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "Channel is done moving\n");
+
+			}
 			switch_channel_set_state(channel, CS_EXECUTE);
 		} else {
 			/* Move channel's state machine to ROUTING */
@@ -485,7 +490,7 @@ switch_status_t sofia_on_hangup(switch_core_session_t *session)
 		switch_core_session_rwunlock(a_session);
 	}
 
-	if (switch_true(switch_channel_get_variable(channel, "kill_channel_silently"))) {
+	if (switch_true(switch_channel_get_variable(channel, "channel_is_moving"))) {
 		goto done;
 	}
 
