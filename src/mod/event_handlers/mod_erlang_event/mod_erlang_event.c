@@ -103,6 +103,7 @@ static void remove_binding(listener_t *listener, erlang_pid * pid)
         for (ptr = bindings.head; ptr; lst = ptr, ptr = ptr->next) {
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Hunting for a binding\n");
                 if ((listener && ptr->listener == listener) || (pid && (ptr->process.type == ERLANG_PID) && !ei_compare_pids(&ptr->process.pid, pid))) {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Target acquired - found binding\n");
                         if (bindings.head == ptr) {
                                 if (ptr->next) {
                                         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removing binding at the head\n");
@@ -124,7 +125,7 @@ static void remove_binding(listener_t *listener, erlang_pid * pid)
                         }
                         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removed binding\n");
                 } else {
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "This is not the binding you are looking for...\n");
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "These are the not the bindings you are looking for...\n");
                         switch_xml_set_binding_sections(bindings.search_binding, switch_xml_get_binding_sections(bindings.search_binding) | ptr->section);
                 }
         }
@@ -287,6 +288,7 @@ static void remove_listener(listener_t *listener)
 	for (ptr = listen_list.listeners; ptr; lst = ptr, ptr = ptr->next) {
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Hunting for a listener\n");
                 if (listener && ptr == listener) {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Target acquired - found listener\n");
                         if (listen_list.listeners == ptr) {
                                 if (ptr->next) {
                                         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removing listener at the head\n");
@@ -308,7 +310,7 @@ static void remove_listener(listener_t *listener)
                         }
                         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removed listener\n");
                 } else {
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "This is not the listener you are looking for...\n");
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "These are the not the listeners you are looking for...\n");
                 }
         }
         
