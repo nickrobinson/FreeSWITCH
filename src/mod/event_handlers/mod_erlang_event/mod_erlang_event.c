@@ -100,28 +100,34 @@ static void remove_binding(listener_t *listener, erlang_pid * pid)
 
 	switch_xml_set_binding_sections(bindings.search_binding, SWITCH_XML_SECTION_MAX);
 
-	for (ptr = bindings.head; ptr; lst = ptr, ptr = ptr->next) {
-		if ((listener && ptr->listener == listener) || (pid && (ptr->process.type == ERLANG_PID) && !ei_compare_pids(&ptr->process.pid, pid))) {
-			if (bindings.head == ptr) {
-				if (ptr->next) {
-					bindings.head = ptr->next;
-				} else {
-					switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removed all (only?) binding\n");
-					bindings.head = NULL;
-					break;
-				}
-			} else {
-				if (ptr->next) {
-					lst->next = ptr->next;
-				} else {
-					lst->next = NULL;
-				}
-			}
-			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removed binding\n");
-		} else {
-			switch_xml_set_binding_sections(bindings.search_binding, switch_xml_get_binding_sections(bindings.search_binding) | ptr->section);
-		}
-	}
+        for (ptr = bindings.head; ptr; lst = ptr, ptr = ptr->next) {
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Hunting for a binding\n");
+                if ((listener && ptr->listener == listener) || (pid && (ptr->process.type == ERLANG_PID) && !ei_compare_pids(&ptr->process.pid, pid))) {
+                        if (bindings.head == ptr) {
+                                if (ptr->next) {
+                                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removing binding at the head\n");
+                                        bindings.head = ptr->next;
+                                } else {
+                                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removed all (only?) binding\n");
+                                        bindings.head = NULL;
+                                        break;
+                                }
+                        } else {
+                                if (ptr->next) {
+                                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removing binding in the middle\n");
+                                        lst->next = ptr->next;
+                                        ptr = lst;
+                                } else {
+                                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removing binding at the end\n");
+                                        lst->next = NULL;
+                                }
+                        }
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removed binding\n");
+                } else {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "This is not the binding you are looking for...\n");
+                        switch_xml_set_binding_sections(bindings.search_binding, switch_xml_get_binding_sections(bindings.search_binding) | ptr->section);
+                }
+        }
 
 	switch_thread_rwlock_unlock(globals.bindings_rwlock);
 }
@@ -274,19 +280,38 @@ static void add_listener(listener_t *listener)
 
 static void remove_listener(listener_t *listener)
 {
-	listener_t *l, *last = NULL;
+	listener_t *ptr, *lst = NULL;
 
 	switch_thread_rwlock_wrlock(globals.listener_rwlock);
-	for (l = listen_list.listeners; l; l = l->next) {
-		if (l == listener) {
-			if (last) {
-				last->next = l->next;
-			} else {
-				listen_list.listeners = l->next;
-			}
-		}
-		last = l;
-	}
+	
+	for (ptr = listen_list.listeners; ptr; lst = ptr, ptr = ptr->next) {
+                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Hunting for a listener\n");
+                if (listener && ptr == listener) {
+                        if (listen_list.listeners == ptr) {
+                                if (ptr->next) {
+                                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removing listener at the head\n");
+                                        listen_list.listeners = ptr->next;
+                                } else {
+                                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removed all (only?) listener\n");
+                                        listen_list.listeners = NULL;
+                                        break;
+                                }
+                        } else {
+                                if (ptr->next) {
+                                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removing listener in the middle\n");
+                                        lst->next = ptr->next;
+                                        ptr = lst;
+                                } else {
+                                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removing listener at the end\n");
+                                        lst->next = NULL;
+                                }
+                        }
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removed listener\n");
+                } else {
+                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "This is not the listener you are looking for...\n");
+                }
+        }
+        
 	switch_thread_rwlock_unlock(globals.listener_rwlock);
 }
 
