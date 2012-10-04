@@ -6262,8 +6262,7 @@ int sofia_recover_callback(switch_core_session_t *session)
 	end:
 
 	return 1;
-	break;
-	}
+}
 
 
 /* Restore a specific channel where we have metadata for it */
