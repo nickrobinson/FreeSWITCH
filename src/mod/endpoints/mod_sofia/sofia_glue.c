@@ -1917,12 +1917,10 @@ void sofia_glue_tech_patch_sdp(private_object_t *tech_pvt)
 		return;
 	}
 
-
 	switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(tech_pvt->session), SWITCH_LOG_DEBUG, "%s Patched SDP\n---\n%s\n+++\n%s\n",
 					  switch_channel_get_name(tech_pvt->channel), tech_pvt->local_sdp_str, new_sdp);
 
 	sofia_glue_tech_set_local_sdp(tech_pvt, new_sdp, SWITCH_FALSE);
-
 }
 
 
@@ -5873,9 +5871,6 @@ int sofia_recover_session(switch_core_session_t *session, switch_channel_t *chan
 
 		switch_channel_set_flag(channel, CF_RECOVERING);
 
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "ip: %s a_ip: %s port: %s r_ip: %s r_port: %s tech_pvt-lsdpip: %s\n"
-						  ,ip, a_ip, port, r_ip, r_port, tech_pvt->local_sdp_audio_ip);
-
 		if ((use_uuid = switch_channel_get_variable(channel, "origination_uuid"))) {
 			if (switch_core_session_set_uuid(session, use_uuid) == SWITCH_STATUS_SUCCESS) {
 				switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "%s set UUID=%s\n", switch_channel_get_name(channel),
@@ -6058,7 +6053,7 @@ int sofia_recover_callback(switch_core_session_t *session)
 	return sofia_recover_session(session, channel, profile, SWITCH_FALSE);
 }
 
-/* Restore a specific channel where we have metadata for it
+/* Restore a specific channel where we have metadata for it */
 void sofia_glue_move_restore_channel(sofia_profile_t *profile, char *xml_cdr_text)
 {
 	struct recover_helper h = { 0 };
