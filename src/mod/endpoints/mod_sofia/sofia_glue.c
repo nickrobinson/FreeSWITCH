@@ -5842,12 +5842,11 @@ int sofia_recover_session(switch_core_session_t *session, switch_channel_t *chan
 	sofia_glue_attach_private(session, profile, tech_pvt, NULL);
 	switch_channel_set_name(tech_pvt->channel, switch_channel_get_variable(channel, "channel_name"));
 
-
+	if ((tmp = switch_channel_get_variable(channel, "sip_local_sdp_str"))) {
+		tech_pvt->local_sdp_str = switch_core_session_strdup(session, tmp);
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "load local sdp str: %s\n", tech_pvt->local_sdp_str);
+	}
 	sofia_glue_tech_patch_sdp(tech_pvt);
-	/* if ((tmp = switch_channel_get_variable(channel, "sip_local_sdp_str"))) { */
-	/* 	tech_pvt->local_sdp_str = switch_core_session_strdup(session, tmp); */
-	/* 	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "local sdp str: %s\n", tech_pvt->local_sdp_str); */
-	/* } */
 
 	if ((tmp = switch_channel_get_variable(channel, SWITCH_R_SDP_VARIABLE))) {
 		tech_pvt->remote_sdp_str = switch_core_session_strdup(session, tmp);
@@ -5874,7 +5873,7 @@ int sofia_recover_session(switch_core_session_t *session, switch_channel_t *chan
 
 		switch_channel_set_flag(channel, CF_RECOVERING);
 
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "ip: %s a_ip: %s port: %s r_ip: %s r_port: %s tech_pvt-lsdpip\n"
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "ip: %s a_ip: %s port: %s r_ip: %s r_port: %s tech_pvt-lsdpip: %s\n"
 						  ,ip, a_ip, port, r_ip, r_port, tech_pvt->local_sdp_audio_ip);
 
 		if ((use_uuid = switch_channel_get_variable(channel, "origination_uuid"))) {
@@ -6059,7 +6058,7 @@ int sofia_recover_callback(switch_core_session_t *session)
 	return sofia_recover_session(session, channel, profile, SWITCH_FALSE);
 }
 
-/* Restore a specific channel where we have metadata for it */
+/* Restore a specific channel where we have metadata for it
 void sofia_glue_move_restore_channel(sofia_profile_t *profile, char *xml_cdr_text)
 {
 	struct recover_helper h = { 0 };
