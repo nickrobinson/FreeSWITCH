@@ -1664,6 +1664,7 @@ void sofia_glue_tech_patch_sdp(private_object_t *tech_pvt)
 	int bad = 0;
 
 	if (zstr(tech_pvt->local_sdp_str)) {
+		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(tech_pvt->session), SWITCH_LOG_DEBUG, "no local_sdp_str '%s'.\n", tech_pvt->local_sdp_str);
 		return;
 	}
 
@@ -5842,10 +5843,11 @@ int sofia_recover_session(switch_core_session_t *session, switch_channel_t *chan
 	switch_channel_set_name(tech_pvt->channel, switch_channel_get_variable(channel, "channel_name"));
 
 
-	if ((tmp = switch_channel_get_variable(channel, "sip_local_sdp_str"))) {
-		tech_pvt->local_sdp_str = switch_core_session_strdup(session, tmp);
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "local sdp str: %s\n", tech_pvt->local_sdp_str);
-	}
+	sofia_glue_tech_patch_sdp(tech_pvt);
+	/* if ((tmp = switch_channel_get_variable(channel, "sip_local_sdp_str"))) { */
+	/* 	tech_pvt->local_sdp_str = switch_core_session_strdup(session, tmp); */
+	/* 	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "local sdp str: %s\n", tech_pvt->local_sdp_str); */
+	/* } */
 
 	if ((tmp = switch_channel_get_variable(channel, SWITCH_R_SDP_VARIABLE))) {
 		tech_pvt->remote_sdp_str = switch_core_session_strdup(session, tmp);
@@ -5865,9 +5867,12 @@ int sofia_recover_session(switch_core_session_t *session, switch_channel_t *chan
 		const char *ip = switch_channel_get_variable(channel, SWITCH_LOCAL_MEDIA_IP_VARIABLE);
 		const char *a_ip = switch_channel_get_variable(channel, SWITCH_ADVERTISED_MEDIA_IP_VARIABLE);
 		const char *port = switch_channel_get_variable(channel, SWITCH_LOCAL_MEDIA_PORT_VARIABLE);
+
 		const char *r_ip = switch_channel_get_variable(channel, SWITCH_REMOTE_MEDIA_IP_VARIABLE);
 		const char *r_port = switch_channel_get_variable(channel, SWITCH_REMOTE_MEDIA_PORT_VARIABLE);
 		const char *use_uuid;
+
+		sofia_glue_tech_choose_port(tech_pvt);
 
 		switch_channel_set_flag(channel, CF_RECOVERING);
 
