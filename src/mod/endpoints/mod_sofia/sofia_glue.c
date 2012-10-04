@@ -5799,16 +5799,15 @@ static int recover_callback(void *pArg, int argc, char **argv, char **columnName
 	}
 
 	channel = switch_core_session_get_channel(session);
-	if ( !(sofia_recover_session(session, channel, h->profile)) ) {
+
+	if ( !(sofia_recover_session(session, channel, h->profile, true)) ) {
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Failed to recover session\n");
 		switch_xml_free(xml);
 		return 0;
 	} else {
-			sofia_set_flag(tech_pvt, TFLAG_RECOVERING_BRIDGE);
- 
-			switch_channel_set_state(channel, CS_INIT);
-			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_NOTICE, "Resurrecting fallen channel %s\n", switch_channel_get_name(channel));
-			switch_core_session_thread_launch(session);
+		switch_channel_set_state(channel, CS_INIT);
+		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_NOTICE, "Resurrecting fallen channel %s\n", switch_channel_get_name(channel));
+		switch_core_session_thread_launch(session);
 	}
 
 	switch_xml_free(xml);
@@ -5834,10 +5833,10 @@ int sofia_recover_callback(switch_core_session_t *session)
 		return 0;
 	}
 
-	return sofia_recover_session(session, channel, profile);
+	return sofia_recover_session(session, channel, profile, false);
 }
 
-int sofia_recover_session(switch_core_session_t *session, switch_channel_t *channel, sofia_profile_t *profile)
+int sofia_recover_session(switch_core_session_t *session, switch_channel_t *channel, sofia_profile_t *profile, switch_bool_t set_recovering_flag)
 {
 	private_object_t *tech_pvt = NULL;
 	int r = 0;
@@ -5942,6 +5941,9 @@ int sofia_recover_session(switch_core_session_t *session, switch_channel_t *chan
 			if (switch_core_session_set_uuid(session, use_uuid) == SWITCH_STATUS_SUCCESS) {
 				switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "%s set UUID=%s\n", switch_channel_get_name(channel),
 								  use_uuid);
+				if (set_recovering_flag) {
+					sofia_set_flag(tech_pvt, TFLAG_RECOVERING_BRIDGE);
+				}
 			} else {
 				switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_CRIT, "%s set UUID=%s FAILED\n",
 								  switch_channel_get_name(channel), use_uuid);
