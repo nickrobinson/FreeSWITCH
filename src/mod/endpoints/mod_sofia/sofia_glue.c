@@ -5768,6 +5768,11 @@ void sofia_glue_del_profile(sofia_profile_t *profile)
 	switch_mutex_unlock(mod_sofia_globals.hash_mutex);
 }
 
+struct recover_helper {
+	sofia_profile_t *profile;
+	int total;
+};
+
 static int recover_callback(void *pArg, int argc, char **argv, char **columnNames)
 {
 	struct recover_helper *h = (struct recover_helper *) pArg;
@@ -6052,6 +6057,8 @@ int sofia_recover_callback(switch_core_session_t *session)
 
 	if (!(profile = sofia_glue_find_profile(profile_name))) {
 		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_CRIT, "Invalid profile %s\n", profile_name);
+		return 0;
+	}
 
 	tech_pvt = (private_object_t *) switch_core_session_alloc(session, sizeof(private_object_t));
 	tech_pvt->channel = channel;
@@ -6252,10 +6259,11 @@ int sofia_recover_callback(switch_core_session_t *session)
 
 	r++;
 
- end:
+	end:
 
 	return 1;
-}
+	break;
+	}
 
 
 /* Restore a specific channel where we have metadata for it */
