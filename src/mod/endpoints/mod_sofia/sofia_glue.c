@@ -5768,74 +5768,6 @@ void sofia_glue_del_profile(sofia_profile_t *profile)
 	switch_mutex_unlock(mod_sofia_globals.hash_mutex);
 }
 
-struct recover_helper {
-	sofia_profile_t *profile;
-	int total;
-};
-
-static int recover_callback(void *pArg, int argc, char **argv, char **columnNames)
-{
-	struct recover_helper *h = (struct recover_helper *) pArg;
-	switch_xml_t xml;
-	switch_core_session_t *session;
-	switch_channel_t *channel;
-	sofia_profile_t *profile = NULL;
-
-	const char *tmp;
-	const char *rr;
-
-	xml = switch_xml_parse_str_dynamic(argv[3], SWITCH_TRUE);
-
-	if (!xml) {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Invalid xml string, call not recovered\n");
-		switch_xml_free(xml);
-		return 0;
-	}
-
-	if (!(session = switch_core_session_request_xml(sofia_endpoint_interface, NULL, xml))) {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Invalid xml data, call not recovered. XML was:\n%s\n", argv[3]);
-		switch_xml_free(xml);
-		return 0;
-	}
-
-	channel = switch_core_session_get_channel(session);
-
-	if ( !(sofia_recover_session(session, channel, h->profile, true)) ) {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Failed to recover session\n");
-		switch_xml_free(xml);
-		return 0;
-	} else {
-		switch_channel_set_state(channel, CS_INIT);
-		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_NOTICE, "Resurrecting fallen channel %s\n", switch_channel_get_name(channel));
-		switch_core_session_thread_launch(session);
-	}
-
-	switch_xml_free(xml);
-
-	h->total++;
-
-	return 1;
-}
-
-int sofia_recover_callback(switch_core_session_t *session) 
-{
-	switch_channel_t *channel = switch_core_session_get_channel(session);
-	sofia_profile_t *profile = NULL;
-	const char *profile_name = switch_channel_get_variable_dup(channel, "recovery_profile_name", SWITCH_FALSE, -1);
-
-	if (zstr(profile_name)) {
-		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_CRIT, "Missing profile\n");
-		return 0;
-	}
-
-	if (!(profile = sofia_glue_find_profile(profile_name))) {
-		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_CRIT, "Invalid profile %s\n", profile_name);
-		return 0;
-	}
-
-	return sofia_recover_session(session, channel, profile, false);
-}
-
 int sofia_recover_session(switch_core_session_t *session, switch_channel_t *channel, sofia_profile_t *profile, switch_bool_t set_recovering_flag)
 {
 	private_object_t *tech_pvt = NULL;
@@ -6055,6 +5987,69 @@ int sofia_recover_session(switch_core_session_t *session, switch_channel_t *chan
 	return 1;
 }
 
+struct recover_helper {
+	sofia_profile_t *profile;
+	int total;
+};
+
+static int recover_callback(void *pArg, int argc, char **argv, char **columnNames)
+{
+	struct recover_helper *h = (struct recover_helper *) pArg;
+	switch_xml_t xml;
+	switch_core_session_t *session;
+	switch_channel_t *channel;
+
+	xml = switch_xml_parse_str_dynamic(argv[3], SWITCH_TRUE);
+
+	if (!xml) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Invalid xml string, call not recovered\n");
+		switch_xml_free(xml);
+		return 0;
+	}
+
+	if (!(session = switch_core_session_request_xml(sofia_endpoint_interface, NULL, xml))) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Invalid xml data, call not recovered. XML was:\n%s\n", argv[3]);
+		switch_xml_free(xml);
+		return 0;
+	}
+
+	channel = switch_core_session_get_channel(session);
+
+	if ( !(sofia_recover_session(session, channel, h->profile, SWITCH_TRUE)) ) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Failed to recover session\n");
+		switch_xml_free(xml);
+		return 0;
+	} else {
+		switch_channel_set_state(channel, CS_INIT);
+		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_NOTICE, "Resurrecting fallen channel %s\n", switch_channel_get_name(channel));
+		switch_core_session_thread_launch(session);
+	}
+
+	switch_xml_free(xml);
+
+	h->total++;
+
+	return 1;
+}
+
+int sofia_recover_callback(switch_core_session_t *session) 
+{
+	switch_channel_t *channel = switch_core_session_get_channel(session);
+	sofia_profile_t *profile = NULL;
+	const char *profile_name = switch_channel_get_variable_dup(channel, "recovery_profile_name", SWITCH_FALSE, -1);
+
+	if (zstr(profile_name)) {
+		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_CRIT, "Missing profile\n");
+		return 0;
+	}
+
+	if (!(profile = sofia_glue_find_profile(profile_name))) {
+		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_CRIT, "Invalid profile %s\n", profile_name);
+		return 0;
+	}
+
+	return sofia_recover_session(session, channel, profile, SWITCH_FALSE);
+}
 
 /* Restore a specific channel where we have metadata for it */
 void sofia_glue_move_restore_channel(sofia_profile_t *profile, char *xml_cdr_text)
