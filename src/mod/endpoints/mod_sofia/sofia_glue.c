@@ -5779,7 +5779,8 @@ static int recover_callback(void *pArg, int argc, char **argv, char **columnName
 	switch_xml_t xml;
 	switch_core_session_t *session;
 	switch_channel_t *channel;
-	private_object_t *tech_pvt = NULL;
+	sofia_profile_t *profile = NULL;
+
 	const char *tmp;
 	const char *rr;
 
@@ -5797,237 +5798,17 @@ static int recover_callback(void *pArg, int argc, char **argv, char **columnName
 		return 0;
 	}
 
-	if (!(tech_pvt = (private_object_t *) switch_core_session_alloc(session, sizeof(private_object_t)))) {
-		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_CRIT, "Hey where is my memory pool?\n");
-		switch_core_session_destroy(&session);
+	channel = switch_core_session_get_channel(session);
+	if ( !(sofia_recover_session(session, channel, h->profile)) ) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Failed to recover session\n");
 		switch_xml_free(xml);
 		return 0;
-	}
-
-	channel = tech_pvt->channel = switch_core_session_get_channel(session);
-
-	switch_mutex_init(&tech_pvt->flag_mutex, SWITCH_MUTEX_NESTED, switch_core_session_get_pool(session));
-	switch_mutex_init(&tech_pvt->sofia_mutex, SWITCH_MUTEX_NESTED, switch_core_session_get_pool(session));
-
-	tech_pvt->remote_ip = (char *) switch_channel_get_variable(channel, "sip_network_ip");
-	tech_pvt->remote_port = atoi(switch_str_nil(switch_channel_get_variable(channel, "sip_network_port")));
-	tech_pvt->caller_profile = switch_channel_get_caller_profile(channel);
-
-	if ((tmp = switch_channel_get_variable(tech_pvt->channel, "sip_2833_send_payload"))) {
-		int te = atoi(tmp);
-		if (te > 64) {
-			tech_pvt->te = te;
-		} 
-	}
-
-	if ((tmp = switch_channel_get_variable(tech_pvt->channel, "sip_2833_recv_payload"))) {
-		int te = atoi(tmp);
-		if (te > 64) {
-			tech_pvt->recv_te = te;
-		} 
-	}
-
-	rr = switch_channel_get_variable(channel, "sip_invite_record_route");
-
-	if (switch_channel_direction(channel) == SWITCH_CALL_DIRECTION_OUTBOUND) {
-		tech_pvt->dest = switch_core_session_sprintf(session, "sip:%s", switch_channel_get_variable(channel, "sip_req_uri"));
-		switch_channel_set_variable(channel, "sip_handle_full_from", switch_channel_get_variable(channel, "sip_full_from"));
-		switch_channel_set_variable(channel, "sip_handle_full_to", switch_channel_get_variable(channel, "sip_full_to"));
 	} else {
-
-		int break_rfc = switch_true(switch_channel_get_variable(channel, "sip_recovery_break_rfc"));
-
-		tech_pvt->redirected = switch_core_session_sprintf(session, "sip:%s", switch_channel_get_variable(channel, "sip_contact_uri"));
-
-		if (zstr(rr)) {
-			switch_channel_set_variable_printf(channel, "sip_invite_route_uri", "<sip:%s@%s:%s;lr>",
-											   switch_channel_get_variable(channel, "sip_from_user"),
-											   switch_channel_get_variable(channel, "sip_network_ip"), switch_channel_get_variable(channel, "sip_network_port")
-											   );
-		}
-
-		tech_pvt->dest = switch_core_session_sprintf(session, "sip:%s", switch_channel_get_variable(channel, "sip_from_uri"));
-
-		if (!switch_channel_get_variable_dup(channel, "sip_handle_full_from", SWITCH_FALSE, -1)) {
-			switch_channel_set_variable(channel, "sip_handle_full_from", switch_channel_get_variable(channel, break_rfc ? "sip_full_from" : "sip_full_to"));
-		}
-
-		if (!switch_channel_get_variable_dup(channel, "sip_handle_full_to", SWITCH_FALSE, -1)) {
-			switch_channel_set_variable(channel, "sip_handle_full_to", switch_channel_get_variable(channel, break_rfc ? "sip_full_to" : "sip_full_from"));
-		}
-	}
-
-	if (rr) {
-		switch_channel_set_variable(channel, "sip_invite_route_uri", rr);
-	}
-
-	tech_pvt->dest_to = tech_pvt->dest;
-
-	sofia_glue_attach_private(session, h->profile, tech_pvt, NULL);
-	switch_channel_set_name(tech_pvt->channel, switch_channel_get_variable(channel, "channel_name"));
-
-
-	if ((tmp = switch_channel_get_variable(channel, "sip_local_sdp_str"))) {
-		tech_pvt->local_sdp_str = switch_core_session_strdup(session, tmp);
-	}
-
-	if ((tmp = switch_channel_get_variable(channel, SWITCH_R_SDP_VARIABLE))) {
-		tech_pvt->remote_sdp_str = switch_core_session_strdup(session, tmp);
-	}
-
-	switch_channel_set_variable(channel, "sip_invite_call_id", switch_channel_get_variable(channel, "sip_call_id"));
-
-	if (switch_true(switch_channel_get_variable(channel, "sip_nat_detected"))) {
-		switch_channel_set_variable_printf(channel, "sip_route_uri", "sip:%s@%s:%s",
-										   switch_channel_get_variable(channel, "sip_req_user"),
-										   switch_channel_get_variable(channel, "sip_network_ip"), switch_channel_get_variable(channel, "sip_network_port")
-										   );
-	}
-
-	if (session) {
-		switch_caller_extension_t *extension = NULL;
-		const char *ip = switch_channel_get_variable(channel, SWITCH_LOCAL_MEDIA_IP_VARIABLE);
-		const char *a_ip = switch_channel_get_variable(channel, SWITCH_ADVERTISED_MEDIA_IP_VARIABLE);
-		const char *port = switch_channel_get_variable(channel, SWITCH_LOCAL_MEDIA_PORT_VARIABLE);
-		const char *r_ip = switch_channel_get_variable(channel, SWITCH_REMOTE_MEDIA_IP_VARIABLE);
-		const char *r_port = switch_channel_get_variable(channel, SWITCH_REMOTE_MEDIA_PORT_VARIABLE);
-		const char *use_uuid;
-
-		sofia_set_flag(tech_pvt, TFLAG_RECOVERING);
-
-		if ((use_uuid = switch_channel_get_variable(channel, "origination_uuid"))) {
-			if (switch_core_session_set_uuid(session, use_uuid) == SWITCH_STATUS_SUCCESS) {
-				switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "%s set UUID=%s\n", switch_channel_get_name(channel),
-								  use_uuid);
-			} else {
-				switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_CRIT, "%s set UUID=%s FAILED\n",
-								  switch_channel_get_name(channel), use_uuid);
-			}
-		}
-
-		if (!switch_channel_test_flag(channel, CF_PROXY_MODE) && ip && port) {
-			const char *tmp;
-			tech_pvt->iananame = tech_pvt->rm_encoding = (char *) switch_channel_get_variable(channel, "sip_use_codec_name");
-			tech_pvt->rm_fmtp = (char *) switch_channel_get_variable(channel, "sip_use_codec_fmtp");
-
-			if ((tmp = switch_channel_get_variable(channel, "sip_use_codec_rate"))) {
-				tech_pvt->rm_rate = atoi(tmp);
-			}
-
-			if ((tmp = switch_channel_get_variable(channel, "sip_use_codec_ptime"))) {
-				tech_pvt->codec_ms = atoi(tmp);
-			}
-
-			if ((tmp = switch_channel_get_variable(channel, "sip_use_pt"))) {
-				tech_pvt->pt = tech_pvt->agreed_pt = (switch_payload_t)atoi(tmp);
-			}
-
-			sofia_glue_tech_set_codec(tech_pvt, 1);
-
-			tech_pvt->adv_sdp_audio_ip = tech_pvt->extrtpip = (char *) ip;
-			tech_pvt->adv_sdp_audio_port = tech_pvt->local_sdp_audio_port = (switch_port_t)atoi(port);
-
-			if (!zstr(ip)) {
-				tech_pvt->local_sdp_audio_ip = switch_core_session_strdup(session, ip);
-				tech_pvt->rtpip = tech_pvt->local_sdp_audio_ip;
-			}
-
-			if (!zstr(a_ip)) {
-				tech_pvt->adv_sdp_audio_ip = switch_core_session_strdup(session, a_ip);
-			}
-
-			if (r_ip && r_port) {
-				tech_pvt->remote_sdp_audio_ip = (char *) r_ip;
-				tech_pvt->remote_sdp_audio_port = (switch_port_t)atoi(r_port);
-			}
-
-			if (switch_channel_test_flag(channel, CF_VIDEO)) {
-				if ((tmp = switch_channel_get_variable(channel, "sip_use_video_pt"))) {
-					tech_pvt->video_pt = tech_pvt->video_agreed_pt = (switch_payload_t)atoi(tmp);
-				}
-
-
-				tech_pvt->video_rm_encoding = (char *) switch_channel_get_variable(channel, "sip_use_video_codec_name");
-				tech_pvt->video_rm_fmtp = (char *) switch_channel_get_variable(channel, "sip_use_video_codec_fmtp");
-
-				ip = switch_channel_get_variable(channel, SWITCH_LOCAL_VIDEO_IP_VARIABLE);
-				port = switch_channel_get_variable(channel, SWITCH_LOCAL_VIDEO_PORT_VARIABLE);
-				r_ip = switch_channel_get_variable(channel, SWITCH_REMOTE_VIDEO_IP_VARIABLE);
-				r_port = switch_channel_get_variable(channel, SWITCH_REMOTE_VIDEO_PORT_VARIABLE);
-
-				sofia_set_flag(tech_pvt, TFLAG_VIDEO);
-
-				if ((tmp = switch_channel_get_variable(channel, "sip_use_video_codec_rate"))) {
-					tech_pvt->video_rm_rate = atoi(tmp);
-				}
-
-				if ((tmp = switch_channel_get_variable(channel, "sip_use_video_codec_ptime"))) {
-					tech_pvt->video_codec_ms = atoi(tmp);
-				}
-
-				tech_pvt->adv_sdp_video_port = tech_pvt->local_sdp_video_port = (switch_port_t)atoi(port);
-
-				if (r_ip && r_port) {
-					tech_pvt->remote_sdp_video_ip = (char *) r_ip;
-					tech_pvt->remote_sdp_video_port = (switch_port_t)atoi(r_port);
-				}
-				//sofia_glue_tech_set_video_codec(tech_pvt, 1);
-			}
-
-			sofia_glue_set_local_sdp(tech_pvt, NULL, 0, NULL, 1);
-
-			if (sofia_glue_activate_rtp(tech_pvt, 0) != SWITCH_STATUS_SUCCESS) {
-				switch_xml_free(xml);
-				return 0;
-			}
-
-			if (switch_rtp_ready(tech_pvt->rtp_session)) {
-				if ((tmp = switch_channel_get_variable(channel, "sip_audio_recv_pt"))) {
-					switch_rtp_set_recv_pt(tech_pvt->rtp_session, (switch_payload_t)atoi(tmp));
-				}
-			}
-
-			if (switch_rtp_ready(tech_pvt->video_rtp_session)) {
-				if ((tmp = switch_channel_get_variable(channel, "sip_video_recv_pt"))) {
-					switch_rtp_set_recv_pt(tech_pvt->rtp_session, (switch_payload_t)atoi(tmp));
-				}
-			}
-
-			if (tech_pvt->te) {
-				switch_rtp_set_telephony_event(tech_pvt->rtp_session, tech_pvt->te);
-			}
-
-			if (tech_pvt->recv_te) {
-				switch_rtp_set_telephony_recv_event(tech_pvt->rtp_session, tech_pvt->recv_te);
-			}
-
-		}
-
-		if (switch_channel_get_partner_uuid(channel)) {
 			sofia_set_flag(tech_pvt, TFLAG_RECOVERING_BRIDGE);
-		} else {
-			switch_xml_t callflow, param, x_extension;
-			if ((extension = switch_caller_extension_new(session, "recovery", "recovery")) == 0) {
-				abort();
-			}
-
-			if ((callflow = switch_xml_child(xml, "callflow")) && (x_extension = switch_xml_child(callflow, "extension"))) {
-				for (param = switch_xml_child(x_extension, "application"); param; param = param->next) {
-					const char *var = switch_xml_attr_soft(param, "app_name");
-					const char *val = switch_xml_attr_soft(param, "app_data");
-					/* skip announcement type apps */
-					if (strcasecmp(var, "speak") && strcasecmp(var, "playback") && strcasecmp(var, "gentones") && strcasecmp(var, "say")) {
-						switch_caller_extension_add_application(session, extension, var, val);
-					}
-				}
-			}
-
-			switch_channel_set_caller_extension(channel, extension);
-		}
-
-		switch_channel_set_state(channel, CS_INIT);
-		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_NOTICE, "Resurrecting fallen channel %s\n", switch_channel_get_name(channel));
-		switch_core_session_thread_launch(session);
+ 
+			switch_channel_set_state(channel, CS_INIT);
+			switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_NOTICE, "Resurrecting fallen channel %s\n", switch_channel_get_name(channel));
+			switch_core_session_thread_launch(session);
 	}
 
 	switch_xml_free(xml);
@@ -6039,16 +5820,9 @@ static int recover_callback(void *pArg, int argc, char **argv, char **columnName
 
 int sofia_recover_callback(switch_core_session_t *session) 
 {
-
 	switch_channel_t *channel = switch_core_session_get_channel(session);
-	private_object_t *tech_pvt = NULL;
-
 	sofia_profile_t *profile = NULL;
-	const char *tmp;
-	const char *rr;
-	int r = 0;
 	const char *profile_name = switch_channel_get_variable_dup(channel, "recovery_profile_name", SWITCH_FALSE, -1);
-	
 
 	if (zstr(profile_name)) {
 		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_CRIT, "Missing profile\n");
@@ -6060,7 +5834,22 @@ int sofia_recover_callback(switch_core_session_t *session)
 		return 0;
 	}
 
-	tech_pvt = (private_object_t *) switch_core_session_alloc(session, sizeof(private_object_t));
+	return sofia_recover_session(session, channel, profile);
+}
+
+int sofia_recover_session(switch_core_session_t *session, switch_channel_t *channel, sofia_profile_t *profile)
+{
+	private_object_t *tech_pvt = NULL;
+	int r = 0;
+	const char *rr;
+	const char *tmp;
+
+	if (!(tech_pvt = (private_object_t *) switch_core_session_alloc(session, sizeof(private_object_t)))) {
+		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_CRIT, "Hey where is my memory pool?\n");
+		switch_core_session_destroy(&session);
+		return 0;
+	}
+
 	tech_pvt->channel = channel;
 
 	switch_mutex_init(&tech_pvt->flag_mutex, SWITCH_MUTEX_NESTED, switch_core_session_get_pool(session));
@@ -7258,8 +7047,6 @@ void sofia_glue_tech_simplify(private_object_t *tech_pvt)
 	if (!switch_channel_test_flag(tech_pvt->channel, CF_ANSWERED) || switch_channel_test_flag(tech_pvt->channel, CF_SIMPLIFY)) {
 		return;
 	}
-
-
 
 	if ((uuid = switch_channel_get_partner_uuid(tech_pvt->channel))
 		&& (other_session = switch_core_session_locate(uuid))) {
