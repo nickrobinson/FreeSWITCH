@@ -5997,6 +5997,7 @@ static int recover_callback(void *pArg, int argc, char **argv, char **columnName
 	switch_xml_t xml;
 	switch_core_session_t *session;
 	switch_channel_t *channel;
+	switch_event_t *event = NULL;
 
 	xml = switch_xml_parse_str_dynamic(argv[3], SWITCH_TRUE);
 
@@ -6028,7 +6029,6 @@ static int recover_callback(void *pArg, int argc, char **argv, char **columnName
 
 	h->total++;
 
-	switch_event_t *event = NULL;
 	/* Tell the world that the channel has moved! */
 	if (switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, MY_EVENT_MOVE_COMPLETE) == SWITCH_STATUS_SUCCESS) {
 		switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "profile_name", h->profile->name);
