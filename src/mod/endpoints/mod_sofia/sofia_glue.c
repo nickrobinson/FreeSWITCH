@@ -5872,12 +5872,10 @@ int sofia_recover_session(switch_core_session_t *session, switch_channel_t *chan
 		const char *r_port = switch_channel_get_variable(channel, SWITCH_REMOTE_MEDIA_PORT_VARIABLE);
 		const char *use_uuid;
 
-		sofia_glue_tech_choose_port(tech_pvt);
-
 		switch_channel_set_flag(channel, CF_RECOVERING);
 
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "ip: %s a_ip: %s port: %s r_ip: %s r_port: %s\n"
-						  ,ip, a_ip, port, r_ip, r_port);
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "ip: %s a_ip: %s port: %s r_ip: %s r_port: %s tech_pvt-lsdpip\n"
+						  ,ip, a_ip, port, r_ip, r_port, tech_pvt->local_sdp_audio_ip);
 
 		if ((use_uuid = switch_channel_get_variable(channel, "origination_uuid"))) {
 			if (switch_core_session_set_uuid(session, use_uuid) == SWITCH_STATUS_SUCCESS) {
