@@ -5844,10 +5844,12 @@ int sofia_recover_session(switch_core_session_t *session, switch_channel_t *chan
 
 	if ((tmp = switch_channel_get_variable(channel, "sip_local_sdp_str"))) {
 		tech_pvt->local_sdp_str = switch_core_session_strdup(session, tmp);
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "local sdp str: %s\n", tech_pvt->local_sdp_str);
 	}
 
 	if ((tmp = switch_channel_get_variable(channel, SWITCH_R_SDP_VARIABLE))) {
 		tech_pvt->remote_sdp_str = switch_core_session_strdup(session, tmp);
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "remote sdp str: %s\n", tech_pvt->remote_sdp_str);
 	}
 
 	switch_channel_set_variable(channel, "sip_invite_call_id", switch_channel_get_variable(channel, "sip_call_id"));
@@ -5868,6 +5870,9 @@ int sofia_recover_session(switch_core_session_t *session, switch_channel_t *chan
 		const char *use_uuid;
 
 		switch_channel_set_flag(channel, CF_RECOVERING);
+
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "ip: %s a_ip: %s port: %s r_ip: %s r_port: %s\n"
+						  ,ip, a_ip, port, r_ip, r_port);
 
 		if ((use_uuid = switch_channel_get_variable(channel, "origination_uuid"))) {
 			if (switch_core_session_set_uuid(session, use_uuid) == SWITCH_STATUS_SUCCESS) {
@@ -6008,7 +6013,7 @@ static int recover_callback(void *pArg, int argc, char **argv, char **columnName
 	}
 
 	if (!(session = switch_core_session_request_xml(sofia_endpoint_interface, NULL, xml))) {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Invalid xml data, call not recovered. XML was:\n%s\n", argv[3]);
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Invalid xml data, call not recovered.\n");
 		switch_xml_free(xml);
 		return 0;
 	}
