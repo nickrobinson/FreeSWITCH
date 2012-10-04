@@ -1664,7 +1664,6 @@ void sofia_glue_tech_patch_sdp(private_object_t *tech_pvt)
 	int bad = 0;
 
 	if (zstr(tech_pvt->local_sdp_str)) {
-		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(tech_pvt->session), SWITCH_LOG_DEBUG, "no local_sdp_str '%s'.\n", tech_pvt->local_sdp_str);
 		return;
 	}
 
@@ -1690,12 +1689,10 @@ void sofia_glue_tech_patch_sdp(private_object_t *tech_pvt)
 	new_sdp = switch_core_session_alloc(tech_pvt->session, len);
 	switch_snprintf(port_buf, sizeof(port_buf), "%u", tech_pvt->adv_sdp_audio_port);
 
-
 	p = tech_pvt->local_sdp_str;
 	q = new_sdp;
 	pe = p + strlen(p);
 	qe = q + len - 1;
-
 
 	while (p && *p) {
 		if (p >= pe) {
