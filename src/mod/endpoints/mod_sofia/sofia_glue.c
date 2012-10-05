@@ -6037,6 +6037,8 @@ static int recover_callback(void *pArg, int argc, char **argv, char **columnName
 		switch_event_fire(&event);
 	}
 
+	switch_channel_set_variable(channel, "channel_is_moving", "false");
+
 	return 1;
 }
 
