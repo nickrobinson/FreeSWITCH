@@ -5,7 +5,7 @@
 #define MAX_PID_CHARS 255
 
 typedef enum {
-	LFLAG_AUTHED = (1 << 0),
+	LFLAG_READY = (1 << 0),
 	LFLAG_RUNNING = (1 << 1),
 	LFLAG_EVENTS = (1 << 2),
 	LFLAG_LOG = (1 << 3),
@@ -29,43 +29,17 @@ typedef enum {
 	ERLANG_BINARY
 } erlang_encoding_t;
 
-typedef enum {
-	NONE = 0,
-	ERLANG_PID,
-	ERLANG_REG_PROCESS
-} process_type;
-
-struct erlang_process {
-	process_type type;
-	char *reg_name;
-	erlang_pid pid;
-};
-
-struct xml_fetch_msg {
-	switch_xml_t xml;
-	switch_mutex_t *mutex;
-	char uuid_str[SWITCH_UUID_FORMATTED_LENGTH + 1];
-	const char *section;
-	const char *tag_name;
-	const char *key_name;
-	const char *key_value;
-	switch_bool_t responded;
-	int responses_remaining;
-};
-
-typedef struct xml_fetch_msg xml_fetch_msg_t;
-
 struct listener {
 	uint32_t id;
 	int clientfd;
 	switch_queue_t *event_queue;
 	switch_queue_t *log_queue;
+	switch_queue_t *fetch_queue;
 	switch_memory_pool_t *pool;
 	switch_mutex_t *flag_mutex;
 	uint32_t flags;
 	switch_log_level_t level;
 	uint8_t event_list[SWITCH_EVENT_ALL + 1];
-	switch_hash_t *event_hash;
 	switch_hash_t *event_bindings;
 	switch_hash_t *session_bindings;
 	switch_hash_t *log_bindings;
@@ -76,17 +50,29 @@ struct listener {
 	int lost_logs;
 	char remote_ip[50];
 	char *peer_nodename;
-	xml_msg_list_t *xml_msgs;
 	struct ei_cnode_s *ec;
 	struct listener *next;
 };
 typedef struct listener listener_t;
 
+struct xml_fetch_msg {
+	switch_xml_t xml;
+	switch_mutex_t *mutex;
+    switch_thread_cond_t *response_available;
+	char uuid_str[SWITCH_UUID_FORMATTED_LENGTH + 1];
+	const char *section;
+	const char *tag_name;
+	const char *key_name;
+	const char *key_value;
+	switch_event_t *params;	
+};
+
+typedef struct xml_fetch_msg xml_fetch_msg_t;
+
 struct prefs_s {
 	switch_mutex_t *mutex;
 	char *ip;
 	uint16_t port;
-	int done;
 	int threads;
 	char *acl[MAX_ACL];
 	uint32_t acl_count;
@@ -102,19 +88,26 @@ struct prefs_s {
 
 typedef struct prefs_s prefs_t;
 
-struct api_command_struct {
-	char *api_cmd;
-	char *arg;
-	listener_t *listener;
-	char uuid_str[SWITCH_UUID_FORMATTED_LENGTH + 1];
-	uint8_t bg;
-	erlang_pid pid;
+struct globals_s {
+	switch_mutex_t *fetch_resp_mutex;
+	switch_hash_t *fetch_resp_hash;
 	switch_memory_pool_t *pool;
-};
+	switch_event_node_t *node;
+	uint32_t flags;
+	int debug;
+} globals;
+
+typedef struct globals_s globals_t;
 
 /* kazoo_binding.c */
 switch_status_t flush_all_bindings(listener_t *listener);
 switch_status_t remove_pid_from_all_bindings(listener_t *listener, erlang_pid *from);
+
+switch_status_t send_fetch_to_bindings(listener_t *listener, char *uuid_str);
+switch_status_t add_fetch_binding(listener_t *listener, char *section, erlang_pid *from);
+switch_status_t remove_pid_from_fetch_binding(listener_t *listener, char *section, erlang_pid *from);
+switch_status_t remove_pid_from_fetch_bindings(listener_t *listener, erlang_pid *from);
+switch_status_t flush_fetch_bindings(listener_t *listener);
 
 switch_status_t has_event_bindings(listener_t *listener, switch_event_t *event);
 switch_status_t send_event_to_bindings(listener_t *listener, switch_event_t *event);
@@ -128,29 +121,19 @@ switch_status_t handle_msg(listener_t *listener, erlang_msg * msg, ei_x_buff * b
 
 /* ei_helpers.c */
 void ei_link(listener_t *listener, erlang_pid * from, erlang_pid * to);
-void ei_encode_switch_event_headers(ei_x_buff * ebuf, switch_event_t *event, prefs_t *prefs);
-void ei_encode_switch_event_tag(ei_x_buff * ebuf, switch_event_t *event, char *tag, prefs_t *prefs);
+void ei_encode_switch_event_headers(ei_x_buff * ebuf, switch_event_t *event);
+void ei_encode_switch_event_tag(ei_x_buff * ebuf, switch_event_t *event, char *tag);
 int ei_pid_from_rpc(struct ei_cnode_s *ec, int sockfd, erlang_ref * ref, char *module, char *function);
 void ei_x_print_reg_msg(ei_x_buff * buf, char *dest, int send);
 void ei_x_print_msg(ei_x_buff * buf, erlang_pid * pid, int send);
-int ei_sendto(ei_cnode * ec, int fd, struct erlang_process *process, ei_x_buff * buf);
-int ei_helper_send(listener_t *listener, erlang_pid* to, char* buf, int len);
+int ei_helper_send(listener_t *listener, erlang_pid* to, ei_x_buff *buf);
 void ei_hash_ref(erlang_ref * ref, char *output);
 int ei_compare_pids(erlang_pid * pid1, erlang_pid * pid2);
 int ei_decode_string_or_binary(char *buf, int *index, int maxlen, char *dst);
 switch_status_t initialize_ei(struct ei_cnode_s *ec, switch_sockaddr_t *sa, prefs_t *prefs);
 
-#define ei_encode_switch_event(_b, _e, _p) ei_encode_switch_event_tag(_b, _e, "event", _p)
-
-/* crazy macro for toggling encoding type */
-#define _ei_x_encode_string(buf, string) switch (prefs->encoding) { \
-	case ERLANG_BINARY: \
-						ei_x_encode_binary(buf, string, strlen(string)); \
-	break; \
-	default: \
-			 ei_x_encode_string(buf, string); \
-	break; \
-}
+#define ei_encode_switch_event(_b, _e) ei_encode_switch_event_tag(_b, _e, "event");
+#define _ei_x_encode_string(buf, string) { ei_x_encode_binary(buf, string, strlen(string)); }
 
 /* For Emacs:
  * Local Variables:

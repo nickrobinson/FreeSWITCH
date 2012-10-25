@@ -2,7 +2,7 @@ BASE=../../../..
 
 LOCAL_SOURCES=ei_helpers.c handle_msg.c kazoo_bindings.c
 LOCAL_OBJS=ei_helpers.o handle_msg.o kazoo_bindings.o
-LOCAL_CFLAGS= -I/usr/lib64/erlang/lib/erl_interface-3.7.4/include  -D_REENTRANT -I/home/kanderson/FreeSWITCH/libs/apr/include
-LOCAL_LDFLAGS= -L/usr/lib64/erlang/lib/erl_interface-3.7.4/lib  -lei
+LOCAL_CFLAGS= -I/usr/lib64/erlang/lib/erl_interface-3.7.5/include  -D_REENTRANT -I/usr/local/src/FreeSWITCH/libs/apr/include
+LOCAL_LDFLAGS= -L/usr/lib64/erlang/lib/erl_interface-3.7.5/lib  -lei
 
 include $(BASE)/build/modmake.rules

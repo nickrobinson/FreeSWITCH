@@ -83,7 +83,7 @@ void ei_link(listener_t *listener, erlang_pid * from, erlang_pid * to) {
     switch_thread_rwlock_unlock(listener->rwlock);
 }
 
-void ei_encode_switch_event_headers(ei_x_buff * ebuf, switch_event_t *event, prefs_t *prefs) {
+void ei_encode_switch_event_headers(ei_x_buff * ebuf, switch_event_t *event) {
     int i;
     char *uuid = switch_event_get_header(event, "unique-id");
 
@@ -118,11 +118,10 @@ void ei_encode_switch_event_headers(ei_x_buff * ebuf, switch_event_t *event, pre
     ei_x_encode_empty_list(ebuf);
 }
 
-void ei_encode_switch_event_tag(ei_x_buff * ebuf, switch_event_t *event, char *tag, prefs_t *prefs) {
-
+void ei_encode_switch_event_tag(ei_x_buff * ebuf, switch_event_t *event, char *tag) {
     ei_x_encode_tuple_header(ebuf, 2);
     ei_x_encode_atom(ebuf, tag);
-    ei_encode_switch_event_headers(ebuf, event, prefs);
+    ei_encode_switch_event_headers(ebuf, event);
 }
 
 /* function to make rpc call to remote node to retrieve a pid -
@@ -170,28 +169,7 @@ void ei_x_print_msg(ei_x_buff * buf, erlang_pid * pid, int send) {
     free(pbuf);
 }
 
-int ei_sendto(ei_cnode * ec, int fd, struct erlang_process *process, ei_x_buff * buf) {
-    int ret;
-    if (process->type == ERLANG_PID) {
-        ret = ei_send(fd, &process->pid, buf->buff, buf->index);
-#ifdef EI_DEBUG
-        ei_x_print_msg(buf, &process->pid, 1);
-#endif
-    } else if (process->type == ERLANG_REG_PROCESS) {
-        ret = ei_reg_send(ec, fd, process->reg_name, buf->buff, buf->index);
-#ifdef EI_DEBUG
-        ei_x_print_reg_msg(buf, process->reg_name, 1);
-#endif
-    } else {
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Invalid process type!\n");
-        /* wuh-oh */
-        ret = -1;
-    }
-
-    return ret;
-}
-
-int ei_helper_send(listener_t *listener, erlang_pid* to, char* buf, int len) {
+int ei_helper_send(listener_t *listener, erlang_pid *to, ei_x_buff *buf) {
     int ret = 0;
 
     /* TODO: this isn't good enough, the fs_to_erl_loop might also try to write to the socket */
@@ -199,12 +177,12 @@ int ei_helper_send(listener_t *listener, erlang_pid* to, char* buf, int len) {
     /*		We either need to lock or put the request into a fs_to_erl_loop queue */
     switch_thread_rwlock_rdlock(listener->rwlock);
     if (listener->clientfd) {
-        ret = ei_send(listener->clientfd, to, buf, len);
+        ret = ei_send(listener->clientfd, to, buf->buff, buf->index);
     }
     switch_thread_rwlock_unlock(listener->rwlock);
 
 #ifdef EI_DEBUG
-    ei_x_print_msg(rbuf, &pid, 1);
+    ei_x_print_msg(buf, to, 1);
 #endif
 
     return ret;
@@ -255,7 +233,7 @@ switch_status_t initialize_ei(struct ei_cnode_s *ec, switch_sockaddr_t *sa, pref
     char ipbuf[25];
     const char *ip_addr;
     char *atsign;
-
+		
     /* copy the erlang interface nodename into something we can modify */
     strncpy(thisalivename, prefs->ei_nodename, EI_MAXALIVELEN);
 

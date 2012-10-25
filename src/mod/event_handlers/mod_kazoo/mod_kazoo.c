@@ -42,17 +42,12 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime);
 SWITCH_MODULE_DEFINITION(mod_kazoo, mod_kazoo_load, mod_kazoo_shutdown, mod_kazoo_runtime);
 
 static struct {
-	switch_mutex_t *listener_mutex;
-	switch_event_node_t *node;
-	int debug;
-} globals;
-
-static struct {
 	switch_socket_t *sock;
 	switch_mutex_t *sock_mutex;
 	listener_t *listeners;
+	switch_mutex_t *listeners_mutex;
 	uint8_t ready;
-} listen_list;
+} acceptor;
 
 SWITCH_DECLARE_GLOBAL_STRING_FUNC(set_pref_ip, prefs.ip);
 SWITCH_DECLARE_GLOBAL_STRING_FUNC(set_pref_ei_cookie, prefs.ei_cookie);
@@ -63,54 +58,26 @@ static void *SWITCH_THREAD_FUNC erl_to_fs_loop(switch_thread_t *thread, void *ob
 static void *SWITCH_THREAD_FUNC fs_to_erl_loop(switch_thread_t *thread, void *obj);
 static void launch_erl_to_fs_thread(listener_t *listener);
 static void launch_fs_to_erl_thread(listener_t *listener);
-//static void remove_listener(listener_t *listener);
 static void stop_listener(listener_t *listener);
-static void stop_all_listeners(void);
 
+/*
 static switch_status_t log_handler(const switch_log_node_t *node, switch_log_level_t level) {
-	listener_t *l;
-
-	switch_mutex_lock(globals.listener_mutex);
-	for (l = listen_list.listeners; l; l = l->next) {
-		if (switch_test_flag(l, LFLAG_LOG) && l->level >= node->level) {
-			switch_log_node_t *dnode = switch_log_node_dup(node);
-
-			if (switch_queue_trypush(l->log_queue, dnode) == SWITCH_STATUS_SUCCESS) {
-				if (l->lost_logs) {
-					int ll = l->lost_logs;
-					switch_event_t *event;
-					l->lost_logs = 0;
-					switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CRIT, "Lost %d log lines!\n", ll);
-					if (switch_event_create(&event, SWITCH_EVENT_TRAP) == SWITCH_STATUS_SUCCESS) {
-						switch_event_add_header(event, SWITCH_STACK_BOTTOM, "info", "lost %d log lines", ll);
-						switch_event_fire(&event);
-					}
-				}
-			} else {
-				switch_log_node_free(&dnode);
-				if (++l->lost_logs > MAX_MISSED) {
-					stop_listener(l);
-				}
-			}
-		}
-	}
-	switch_mutex_unlock(globals.listener_mutex);
 
 	return SWITCH_STATUS_SUCCESS;
 }
+*/
 
 static void event_handler(switch_event_t *event) {
 	listener_t *listener;
 
 	switch_assert(event != NULL);
 
-	if (!listen_list.ready) {
+	if (!switch_test_flag(&globals, LFLAG_RUNNING) || !acceptor.ready) {
 		return;
 	}
 
-	switch_mutex_lock(globals.listener_mutex);
-	/* nobody else seems to loop over the listeners like this, why is that? */
-	for (listener = listen_list.listeners; listener; listener = listener->next) {
+	switch_mutex_lock(acceptor.listeners_mutex);
+	for (listener = acceptor.listeners; listener; listener = listener->next) {
 		switch_event_t *clone = NULL;
 		int send = 0;
 
@@ -122,9 +89,6 @@ static void event_handler(switch_event_t *event) {
 		/* TODO: check if the UUID of the event is in listener->session_bindings */
 
 		if (send) {
-			/* TODO: if we tracked the number of listeners we sent this too and */
-			/*     added a mutex for decrementing the last listener could destroy */
-			/*     it and we wouldn't have to clone (alloc)... just a thought */
 			if (switch_event_dup(&clone, event) == SWITCH_STATUS_SUCCESS) {
 				if (switch_queue_trypush(listener->event_queue, clone) != SWITCH_STATUS_SUCCESS) {
 					/* if we couldn't place the cloned event into the listeners */
@@ -136,7 +100,7 @@ static void event_handler(switch_event_t *event) {
 			}
 		}
 	}
-	switch_mutex_unlock(globals.listener_mutex);
+	switch_mutex_unlock(acceptor.listeners_mutex);
 }
 
 /* TODO: this needs to look into listener.fetch_bindings inorder to determine if it can/needs to make the request to that listener */
@@ -144,104 +108,72 @@ static switch_xml_t xml_erlang_fetch(const char *section, const char *tag_name, 
 		void *user_data)
 {
 	switch_xml_t xml = NULL;
-	xml_fetch_msg_t *xml_msg = NULL;
+	xml_fetch_msg_t *fetch_msg = NULL;
 	switch_uuid_t uuid;
-	listener_t *l = NULL;
+	listener_t *listener = NULL;
+	switch_time_t now = 0;
 
-	l = listen_list.listeners;
-	if (!l) {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Received a request for XML, ignoring since there are no erlang nodes connected.\n");
+	if (!switch_test_flag(&globals, LFLAG_RUNNING) || !acceptor.ready) {
 		return xml;
 	}
 
-	switch_zmalloc(xml_msg, sizeof(*xml_msg));
-	switch_assert(xml_msg);
-	switch_mutex_init(&xml_msg->mutex, SWITCH_MUTEX_NESTED, globals.pool);
+	now = switch_micro_time_now();
+
+	switch_zmalloc(fetch_msg, sizeof(*fetch_msg));
+	switch_assert(fetch_msg);
+	switch_mutex_init(&fetch_msg->mutex, SWITCH_MUTEX_DEFAULT, globals.pool);
+	switch_thread_cond_create(&fetch_msg->response_available, globals.pool);
 
 	/* Create a unique identifier for this request */
 	switch_uuid_get(&uuid);
-	switch_uuid_format(xml_msg->uuid_str, &uuid);
+	switch_uuid_format(fetch_msg->uuid_str, &uuid);
 
 	/* Create a request in our queue for an XML binding. No need to copy memory pointers here, we block until they're used elsewhere and returned */
-	xml_msg->responded = SWITCH_FALSE;
-	xml_msg->section = section;
-	xml_msg->tag_name = tag_name;
-	xml_msg->key_name = key_name;
-	xml_msg->key_value = key_value;
-	xml_msg->responses_remaining = 2;   // FIXME: This should be the number of erlang listeners PLUS ONE
+	fetch_msg->section = section;
+	fetch_msg->tag_name = tag_name;
+	fetch_msg->key_name = key_name;
+	fetch_msg->key_value = key_value;
+	fetch_msg->params = params;
 
-	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Received a request for XML - %s / %s / %s = %s (%s)\n", xml_msg->section, xml_msg->tag_name, xml_msg->key_name, xml_msg->key_value, xml_msg->uuid_str);
+	switch_core_hash_insert_locked(globals.fetch_resp_hash, fetch_msg->uuid_str, fetch_msg, globals.fetch_resp_mutex);
 
-	/* Try each erlang listener */
-	while (l) {
-		int timeout = 0;
-		int done = 0;
+	switch_mutex_lock(fetch_msg->mutex);
+			
+	switch_mutex_lock(acceptor.listeners_mutex);
+	for (listener = acceptor.listeners; listener; listener = listener->next) {
+		char *dup_uuid = strdup(fetch_msg->uuid_str);
+		switch_queue_trypush(listener->fetch_queue, dup_uuid);
+	}
+	switch_mutex_unlock(acceptor.listeners_mutex);
 
-		// Determine if this lister has a binding for the information we're looking for. If not, skip to the next listener.
-		// TODO: Ummm yeah...
-		//            switch_core_some_function_search_hash(l.fetch_bindings, section);
+	switch_thread_cond_timedwait(fetch_msg->response_available, fetch_msg->mutex, 3000000);
 
-		if (switch_queue_trypush(l->xml_fetch_queue, xml_msg) == SWITCH_STATUS_SUCCESS) {
-		} else {
-			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Out of memory - could not insert new XML fetch request\n");
-			// TODO: Add out of memory error handling, or wait for space, or...?
-		}
-
-		// Wait for a response or a timeout
-		while (timeout < 1000) {
-			timeout++;
-			switch_mutex_lock(xml_msg->mutex);
-			if (xml_msg->responded == SWITCH_TRUE) {
-				done = 1; 
-				xml_msg.responses_remaining--;
-			}
-			switch_mutex_unlock(xml_msg->mutex);
-		}
-
-		xml_msg = switch_core_alloc(l->pool, sizeof (xml_msg));
-		memset(&xml_msg, 0, sizeof (xml_msg));
-
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Done with request for XML - %s / %s / %s = %s (%s)\n", xml_msg->section, xml_msg->tag_name, xml_msg->key_name, xml_msg->key_value, xml_msg->uuid_str);
-
-		switch_safe_free(xml_msg);
-		switch_mutex_destroy(xml_msg->mutex);
-
-		// Create a unique identifier for this request
-		switch_uuid_get(&uuid);
-		switch_uuid_format(xml_msg->uuid_str, &uuid);
-
-		// Create a request in our queue for an XML binding. No need to copy memory pointers here, we block until they're used elsewhere and returned
-		xml_msg->responded = SWITCH_FALSE;
-		xml_msg->section = section;
-		xml_msg->tag_name = tag_name;
-		xml_msg->key_name = key_name;
-		xml_msg->key_value = key_value;
-
-		push_into_listener_queue(l->xml_msgs, xml_msg);
-
-		// Wait for a response or a timeout
-		while (xml_msg->responded != SWITCH_TRUE) {
-			// FIXME: need to actually go get the xml here hehe
-			xml_msg->responded = SWITCH_TRUE;
-		}
-
-		l = l->next;
+	if (fetch_msg->xml) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Fetch request %s reply after %dms\n", fetch_msg->uuid_str, (int) (switch_micro_time_now() - now) / 1000);
+		xml = fetch_msg->xml;
+	} else {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Fetch request %s timeout after %dms\n", fetch_msg->uuid_str, (int) (switch_micro_time_now() - now) / 1000);
 	}
 
-	switch_safe_free(xml_msg);
+	switch_core_hash_delete_locked(globals.fetch_resp_hash, fetch_msg->uuid_str, globals.fetch_resp_mutex);
+
+	switch_mutex_unlock(fetch_msg->mutex);
+
+	switch_thread_cond_destroy(fetch_msg->response_available);
+	switch_mutex_destroy(fetch_msg->mutex);
+	switch_safe_free(fetch_msg);
 
 	return xml;
 }
 
-
 static void close_socket(switch_socket_t ** sock) {
-	switch_mutex_lock(listen_list.sock_mutex);
+	switch_mutex_lock(acceptor.sock_mutex);
 	if (*sock) {
 		switch_socket_shutdown(*sock, SWITCH_SHUTDOWN_READWRITE);
 		switch_socket_close(*sock);
 		*sock = NULL;
 	}
-	switch_mutex_unlock(listen_list.sock_mutex);
+	switch_mutex_unlock(acceptor.sock_mutex);
 }
 
 static void close_socketfd(int *sockfd) {
@@ -252,11 +184,16 @@ static void close_socketfd(int *sockfd) {
 }
 
 static void add_listener(listener_t *listener) {
-	/* add me to the listeners so I get events */
-	switch_mutex_lock(globals.listener_mutex);
-	listener->next = listen_list.listeners;
-	listen_list.listeners = listener;
-	switch_mutex_unlock(globals.listener_mutex);
+	if (!switch_test_flag(&globals, LFLAG_RUNNING) || !acceptor.ready) {
+		return;
+	}
+
+	/* add me to the acceptor so I get events */
+	switch_mutex_lock(acceptor.listeners_mutex);
+	listener->next = acceptor.listeners;
+	acceptor.listeners = listener;
+	switch_mutex_unlock(acceptor.listeners_mutex);
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Added listener %p: %s (%s)\n", (void *)listener, listener->peer_nodename, listener->remote_ip);
 }
 
 static void flush_listener(listener_t *listener, switch_bool_t flush_log, switch_bool_t flush_events) {
@@ -279,24 +216,18 @@ static void flush_listener(listener_t *listener, switch_bool_t flush_log, switch
 			switch_event_destroy(&pevent);
 		}
 	}
+
+	if (listener->fetch_queue) {
+		while (switch_queue_trypop(listener->fetch_queue, &pop) == SWITCH_STATUS_SUCCESS) {
+			char *uuid_str = (char *) pop;
+			if (!pop)
+				continue;
+			switch_safe_free(uuid_str);
+		}
+	}
 }
 
 static void destroy_listener(listener_t *listener) {
-	listener_t *l, *last = NULL;
-
-	switch_mutex_lock(globals.listener_mutex);
-	for (l = listen_list.listeners; l; l = l->next) {
-		if (l == listener) {
-			if (last) {
-				last->next = l->next;
-			} else {
-				listen_list.listeners = l->next;
-			}
-		}
-		last = l;
-	}
-	switch_mutex_unlock(globals.listener_mutex);
-
 	/* ensure nothing else is still using this listener */
 	switch_thread_rwlock_wrlock(listener->rwlock);
 	switch_thread_rwlock_unlock(listener->rwlock);
@@ -309,46 +240,54 @@ static void destroy_listener(listener_t *listener) {
 	flush_all_bindings(listener);
 
 	/* close the client socket */
-	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Closing connection to erlang node %s\n", listener->peer_nodename);
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Closing connection to erlang node %s\n", listener->peer_nodename);
 	close_socketfd(&listener->clientfd);
 
-	/* TODO: These are in the listener pool, do we need to destroy them? */
-	switch_core_hash_destroy(&listener->event_hash);
+	/* clean up our hashes */
 	switch_core_hash_destroy(&listener->event_bindings);
 	switch_core_hash_destroy(&listener->session_bindings);
 	switch_core_hash_destroy(&listener->log_bindings);
 	switch_core_hash_destroy(&listener->fetch_bindings);
 
-	/* TODO: what about the locks? */
+	/* clean up our locks */
+	switch_mutex_destroy(listener->flag_mutex);
 
 	/* goodbye and thanks for all the fish! */
 	switch_core_destroy_memory_pool(&listener->pool);    
 }
 
 static void stop_listener(listener_t *listener) {
-	/* at the moment, clear the running flag and hope for the best */
-	switch_clear_flag(listener, LFLAG_RUNNING);
-}
+	listener_t *l, *last = NULL;
 
-static void stop_all_listeners(void) {
-	listener_t *listener;
-
-	switch_mutex_lock(globals.listener_mutex);
-	for (listener = listen_list.listeners; listener; listener = listener->next) {
-		stop_listener(listener);
+	switch_mutex_lock(acceptor.listeners_mutex);
+	for (l = acceptor.listeners; l; l = l->next) {
+		if (l == listener) {
+			if (last) {
+				last->next = l->next;
+			} else {
+				acceptor.listeners = l->next;
+			}
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Removed listener %p: %s (%s)\n", (void *)listener, listener->peer_nodename, listener->remote_ip);
+		}
+		last = l;
 	}
-	switch_mutex_unlock(globals.listener_mutex);
+
+	switch_clear_flag(listener, LFLAG_RUNNING);
+
+	switch_mutex_unlock(acceptor.listeners_mutex);
 }
 
 static void *SWITCH_THREAD_FUNC fs_to_erl_loop(switch_thread_t *thread, void *obj) {
+	void *pop;
+	int sent = 0;
 	listener_t *listener = (listener_t *) obj;
 
 	switch_assert(listener != NULL);
 
 	/* add ourselfs to the modules thread count */
-	switch_mutex_lock(globals.listener_mutex);
+	switch_mutex_lock(acceptor.listeners_mutex);
 	prefs.threads++;
-	switch_mutex_unlock(globals.listener_mutex);
+	switch_mutex_unlock(acceptor.listeners_mutex);
 
 	/* This thread is responsible for adding/removing from the listener_list */
 	/* as erl_to_fs_loop does not need to be in the list (since its used to */
@@ -357,19 +296,15 @@ static void *SWITCH_THREAD_FUNC fs_to_erl_loop(switch_thread_t *thread, void *ob
 
 	/* grab a read lock on the listener so nobody can remove it until we exit... */
 	switch_thread_rwlock_rdlock(listener->rwlock);
-	while (switch_test_flag(listener, LFLAG_RUNNING)) {
-		void *pop;
+	while (switch_test_flag(listener, LFLAG_RUNNING) && switch_test_flag(&globals, LFLAG_RUNNING)) {
+		sent = 0;
 
-		if (switch_queue_trypop(listener->xml_fetch_queue, &pop) == SWITCH_STATUS_SUCCESS) {
-			xml_fetch_msg_t *xml_msg = (xml_fetch_msg_t *) pop;
-			switch_mutex_lock(xml_msg->mutex);
-			if (xml_msg) {
-				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Popped a request for XML - %s / %s / %s = %s (%s)\n", xml_msg->section, xml_msg->tag_name, xml_msg->key_name, xml_msg->key_value, xml_msg->uuid_str);
-				xml_msg->responded = SWITCH_TRUE;
-				xml_msg->responses_remaining--;
-			}
-			switch_mutex_unlock(xml_msg->mutex);
+		if (switch_queue_trypop(listener->fetch_queue, &pop) == SWITCH_STATUS_SUCCESS) {
+			char *uuid_str = (char *) pop;
+			send_fetch_to_bindings(listener, uuid_str);
+			switch_safe_free(uuid_str);
 			pop = NULL;
+			sent = 1;
 		}
 
 		if (switch_queue_trypop(listener->event_queue, &pop) == SWITCH_STATUS_SUCCESS) {
@@ -378,19 +313,21 @@ static void *SWITCH_THREAD_FUNC fs_to_erl_loop(switch_thread_t *thread, void *ob
 			/* any erlang processes bound its type */
 			send_event_to_bindings(listener, event);
 			switch_event_destroy(&event);
+			pop = NULL;
+			sent = 1;
 		}
 
 		/* TODO: try to pop the logs queue and send to erlang */
-		/* TODO: try to pop the fetch queue and send to erlang */
-		/*      Before sending a fetch request, store the UUID */
-		/*      and pointer somewhere so we can map the reply */
-		switch_yield(1000);
+
+		if (!sent) {
+			switch_yield(1000);
+		}
 	}
 
 	/* flag this listener as stopped */
 	stop_listener(listener);
 
-	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Shutting down freeswitch event sender for erlang node %s (%s)\n", listener->peer_nodename, listener->remote_ip);
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Shutting down freeswitch event sender for %p: %s (%s)\n", (void *)listener, listener->peer_nodename, listener->remote_ip);
 
 	/* remove the read lock that we have been holding on to while running */
 	switch_thread_rwlock_unlock(listener->rwlock);
@@ -399,9 +336,9 @@ static void *SWITCH_THREAD_FUNC fs_to_erl_loop(switch_thread_t *thread, void *ob
 	destroy_listener(listener);
 
 	/* remove ourself from this modules thread count */
-	switch_mutex_lock(globals.listener_mutex);
+	switch_mutex_lock(acceptor.listeners_mutex);
 	prefs.threads--;
-	switch_mutex_unlock(globals.listener_mutex);
+	switch_mutex_unlock(acceptor.listeners_mutex);
 
 	return NULL;
 }
@@ -413,13 +350,13 @@ static void *SWITCH_THREAD_FUNC erl_to_fs_loop(switch_thread_t *thread, void *ob
 	switch_assert(listener != NULL);
 
 	/* add ourselfs to the modules thread count */
-	switch_mutex_lock(globals.listener_mutex);
+	switch_mutex_lock(acceptor.listeners_mutex);
 	prefs.threads++;
-	switch_mutex_unlock(globals.listener_mutex);
+	switch_mutex_unlock(acceptor.listeners_mutex);
 
 	/* grab a read lock on the listener so nobody can remove it until we exit... */
 	switch_thread_rwlock_rdlock(listener->rwlock);
-	while (switch_test_flag(listener, LFLAG_RUNNING) && status >= 0) {
+	while (switch_test_flag(listener, LFLAG_RUNNING) && switch_test_flag(&globals, LFLAG_RUNNING) && status >= 0) {
 		erlang_msg msg;
 		ei_x_buff buf;
 		ei_x_buff rbuf;
@@ -495,13 +432,13 @@ static void *SWITCH_THREAD_FUNC erl_to_fs_loop(switch_thread_t *thread, void *ob
 						break;
 					default:
 						/* OH NOS! something has gone horribly wrong, shutdown the listener if status set by ei_xreceive_msg_tmo is less than or equal to 0 */
-						switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Erlang communication fault with node %s (%s): erl_errno=%d errno=%d\n", listener->peer_nodename, listener->remote_ip, erl_errno, errno);
+						switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Erlang communication fault with node %p %s (%s): erl_errno=%d errno=%d\n", (void *)listener, listener->peer_nodename, listener->remote_ip, erl_errno, errno);
 						break;
 				}
 				break;
 			default:
 				/* HUH? didnt plan for this, whatevs shutdown the listener if status set by ei_xreceive_msg_tmo is less than or equal to 0 */
-				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Unexpected erlang receive status for node %s (%s): %d\n", listener->peer_nodename, listener->remote_ip, status);
+				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Unexpected erlang receive status %p %s (%s): %d\n", (void *)listener, listener->peer_nodename, listener->remote_ip, status);
 				break;
 		}
 
@@ -510,19 +447,18 @@ static void *SWITCH_THREAD_FUNC erl_to_fs_loop(switch_thread_t *thread, void *ob
 		ei_x_free(&rbuf);
 	}
 
-
 	/* flag this listener as stopped */
-	stop_listener(listener);
+	switch_clear_flag(listener, LFLAG_RUNNING);
 
-	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Shutting down erlang event receiver for node %s (%s)\n", listener->peer_nodename, listener->remote_ip);
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Shutting down erlang event receiver %p: %s (%s)\n", (void *)listener, listener->peer_nodename, listener->remote_ip);
 
 	/* remove the read lock that we have been holding on to while running */
 	switch_thread_rwlock_unlock(listener->rwlock);
 
 	/* remove ourself from this modules thread count */
-	switch_mutex_lock(globals.listener_mutex);
+	switch_mutex_lock(acceptor.listeners_mutex);
 	prefs.threads--;
-	switch_mutex_unlock(globals.listener_mutex);
+	switch_mutex_unlock(acceptor.listeners_mutex);
 
 	return NULL;
 }
@@ -611,16 +547,20 @@ static int config(void) {
 				char *val = (char *) switch_xml_attr_soft(param, "value");
 
 				if (!strcmp(var, "listen-ip")) {
+					switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Set bind ip address: %s\n", val);
 					set_pref_ip(val);
 				} else if (!strcmp(var, "listen-port")) {
+					switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Set port: %d\n", atoi(val));
 					prefs.port = (uint16_t) atoi(val);
 				} else if (!strcmp(var, "cookie")) {
+					switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Set cookie: %s\n", val);
 					set_pref_ei_cookie(val);
 				} else if (!strcmp(var, "cookie-file")) {
 					if (read_cookie_from_file(val) == 1) {
 						switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Unable to read cookie from %s\n", val);
 					}
 				} else if (!strcmp(var, "nodename")) {
+					switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Set node name: %s\n", val);
 					set_pref_ei_nodename(val);
 				} else if (!strcmp(var, "shortname")) {
 					prefs.ei_shortname = switch_true(val);
@@ -700,15 +640,22 @@ static int config(void) {
 
 SWITCH_MODULE_LOAD_FUNCTION(mod_kazoo_load) {
 	// FIX ME:        switch_api_interface_t *api_interface;
-
 	memset(&globals, 0, sizeof(globals));
+	memset(&acceptor, 0, sizeof(acceptor));
+
+	globals.pool = pool;
 
 	/* initialize the listener mutex */
-	switch_mutex_init(&globals.listener_mutex, SWITCH_MUTEX_NESTED, pool);
+	switch_mutex_init(&acceptor.listeners_mutex, SWITCH_MUTEX_DEFAULT, pool);
 
-	/* initialize listen_list */
-	memset(&listen_list, 0, sizeof(listen_list));
-	switch_mutex_init(&listen_list.sock_mutex, SWITCH_MUTEX_NESTED, pool);
+	/* initialize the socket mutex */
+	switch_mutex_init(&acceptor.sock_mutex, SWITCH_MUTEX_DEFAULT, pool);
+
+	/* initialize the xml fetch response mutex */
+	switch_mutex_init(&globals.fetch_resp_mutex, SWITCH_MUTEX_DEFAULT, pool);
+
+	/* initialize the xml fetch response hash */
+	switch_core_hash_init(&globals.fetch_resp_hash, pool);
 
 	/* bind to all switch events */
 	if (switch_event_bind_removable(modname, SWITCH_EVENT_ALL, SWITCH_EVENT_SUBCLASS_ANY, event_handler, NULL, &globals.node) != SWITCH_STATUS_SUCCESS) {
@@ -717,13 +664,14 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_kazoo_load) {
 	}
 
 	/* bind to all logs */
-	if (prefs.bind_to_logger) {
+/*	if (prefs.bind_to_logger) {
 		switch_log_bind_logger(log_handler, SWITCH_LOG_DEBUG, SWITCH_FALSE);
 	}
+*/
 
 	/* bind to all XML requests */
-	//        switch_xml_bind_search_function(xml_erlang_fetch, switch_xml_parse_section_string("directory"), NULL);
-	//        switch_xml_bind_search_function(xml_erlang_fetch, switch_xml_parse_section_string("dialplan"), NULL);
+	switch_xml_bind_search_function(xml_erlang_fetch, switch_xml_parse_section_string("directory"), NULL);
+	switch_xml_bind_search_function(xml_erlang_fetch, switch_xml_parse_section_string("dialplan"), NULL);
 
 	/* connect my internal structure to the blank pointer passed to me */
 	*module_interface = switch_loadable_module_create_module_interface(pool, modname);
@@ -733,6 +681,12 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_kazoo_load) {
 	// FIX ME:        SWITCH_ADD_API(api_interface, "kazoo_bind_logs", "kazoo information", api_exec, "<command> [<args>]");
 	// FIX ME:        switch_console_set_complete("add kazoo listeners");
 
+	config();
+
+	switch_set_flag(&globals, LFLAG_RUNNING);
+
+	switch_set_flag(&globals, LFLAG_READY);
+
 	/* indicate that the module should continue to be loaded */
 	return SWITCH_STATUS_SUCCESS;
 }
@@ -740,24 +694,47 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_kazoo_load) {
 SWITCH_MODULE_SHUTDOWN_FUNCTION(mod_kazoo_shutdown) {
 	int sanity = 0;
 
-	/* TODO: this is stock and likely erroneous/dangerous.... */
+	/* stop taking new requests and start shuting down the threads */
+	switch_clear_flag(&globals, LFLAG_RUNNING);
 
-	prefs.done = 1;
-
-	switch_log_unbind_logger(log_handler);
+//	switch_log_unbind_logger(log_handler);
 	switch_event_unbind(&globals.node);
-	//switch_xml_unbind_search_function_ptr(xml_erlang_fetch);
+	switch_xml_unbind_search_function_ptr(xml_erlang_fetch);
 
-	stop_all_listeners();
-
+	/* give everyone time to cleanly shutdown */
 	while (prefs.threads) {
 		switch_yield(100000);
-		stop_all_listeners();
 		if (++sanity >= 200) {
-			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Unable to kill erlang listeners, continuing. Good luck!\n");
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Unable to kill all threads, continuing. Good luck!\n");
 			break;
 		}
 	}
+
+	/* Close the port we reserved for uPnP/Switch behind firewall, if necessary */
+	if (prefs.nat_map && switch_nat_get_type()) {
+		switch_nat_del_mapping(prefs.port, SWITCH_NAT_TCP);
+	}
+
+	for (uint32_t x = 0; x < prefs.acl_count; x++) {
+		switch_safe_free(prefs.acl[x]);
+	}
+
+	/* clean up our allocated preferences */
+	switch_safe_free(prefs.ip);
+	switch_safe_free(prefs.ei_cookie);
+	switch_safe_free(prefs.ei_nodename);
+
+	/* clean up the fetch response hash */
+	switch_core_hash_destroy(&globals.fetch_resp_hash);
+
+	/* clean up the fetch response mutext */
+	switch_mutex_destroy(globals.fetch_resp_mutex);
+
+	/* clean up the listeners mutex */
+	switch_mutex_destroy(acceptor.listeners_mutex);
+
+	/* clean up the listeners socket mutex */
+	switch_mutex_destroy(acceptor.sock_mutex);
 
 	return SWITCH_STATUS_SUCCESS;
 }
@@ -772,79 +749,87 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime) {
 	apr_os_sock_t sockfd;
 	int clientfd, epmdfd = 0;
 
+	while(!switch_test_flag(&globals, LFLAG_READY)) {
+		switch_yield(100000);
+	}
+
+	switch_mutex_lock(acceptor.listeners_mutex);
+	prefs.threads++;
+	switch_mutex_unlock(acceptor.listeners_mutex);
+
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Erlang connection acceptor starting...\n");
+
 	if (switch_core_new_memory_pool(&pool) != SWITCH_STATUS_SUCCESS) {
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Out Of Memory: Oh My God! They killed Kenny! YOU BASTARDS!\n");
 		return SWITCH_STATUS_TERM;
 	}
 
-	config();
-
 	/* while the module is still running repeatedly try to open and listen to the provided ip:port until successful */
-	while (!prefs.done) {
+	while (switch_test_flag(&globals, LFLAG_RUNNING)) {
 		status = switch_sockaddr_info_get(&sa, prefs.ip, SWITCH_UNSPEC, prefs.port, 0, pool);
 
 		if (!status) {
-			status = switch_socket_create(&listen_list.sock, switch_sockaddr_get_family(sa), SOCK_STREAM, SWITCH_PROTO_TCP, pool);
+			status = switch_socket_create(&acceptor.sock, switch_sockaddr_get_family(sa), SOCK_STREAM, SWITCH_PROTO_TCP, pool);
 		}
 
-		if (!status && listen_list.sock) {
-			status = switch_socket_opt_set(listen_list.sock, SWITCH_SO_REUSEADDR, 1);
+		if (!status && acceptor.sock) {
+			status = switch_socket_opt_set(acceptor.sock, SWITCH_SO_REUSEADDR, 1);
 		}
 
-		if (!status && listen_list.sock) {
-			status = switch_socket_bind(listen_list.sock, sa);
+		if (!status && acceptor.sock) {
+			status = switch_socket_bind(acceptor.sock, sa);
 		}
 
-		if (!status && listen_list.sock) {
-			status = switch_socket_listen(listen_list.sock, 5);
+		if (!status && acceptor.sock) {
+			status = switch_socket_listen(acceptor.sock, 5);
 		}
 
-		if (!status && listen_list.sock) {
+		if (!status && acceptor.sock) {
 			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Erlang connection acceptor listening on %s:%u\n", prefs.ip, prefs.port);
 
 			if (prefs.nat_map) {
 				switch_nat_add_mapping(prefs.port, SWITCH_NAT_TCP, NULL, SWITCH_FALSE);
 			}
 
-			break;
+			/* if the config has specified an erlang release compatability then pass that along to the erlang interface */
+			if (prefs.ei_compat_rel) {
+				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Compatability with OTP R%d requested\n", prefs.ei_compat_rel);
+				ei_set_compat_rel(prefs.ei_compat_rel);
+			}
+			
+			/* try to initialize the erlang interface */
+			if (SWITCH_STATUS_SUCCESS != initialize_ei(&ec, sa, &prefs)) {
+				continue;
+			}
+
+			/* tell the erlang port manager where we can be reached.  this returns a file descriptor pointing to epmd or -1 */
+			if ((epmdfd = ei_publish(&ec, prefs.port)) == -1) {
+				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR,
+								  "Failed to start epmd, is it in the freeswith user $PATH? Try starting it yourself or run an erl shell with the -sname or -name option.  Shutting down.\n");
+				continue;
+			} else {
+				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Connected to epmd and published erlang cnode name %s at port %d\n", ec.thisnodename, prefs.port);
+				
+				/* we are listening on a socket, configured the erlang interface, and published our node name to ip:port mapping... we are ready! */
+				acceptor.ready = 1;        
+
+				break;
+			}
 		} else {
 			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Erlang connection acceptor socket error, could not listen on %s:%u\n", prefs.ip, prefs.port);
 			switch_yield(500000);
 		}
 	}
 
-	/* if the config has specified an erlang release compatability then pass that along to the erlang interface */
-	if (!prefs.done && prefs.ei_compat_rel) {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Compatability with OTP R%d requested\n", prefs.ei_compat_rel);
-		ei_set_compat_rel(prefs.ei_compat_rel);
-	}
-
-	/* try to initialize the erlang interface */
-	if (!prefs.done && SWITCH_STATUS_SUCCESS != initialize_ei(&ec, sa, &prefs)) {
-		prefs.done = 1;
-	}
-
-	/* tell the erlang port manager where we can be reached.  this returns a file descriptor pointing to epmd or -1 */
-	if (!prefs.done && (epmdfd = ei_publish(&ec, prefs.port)) == -1) {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR,
-				"Failed to start epmd, is it in the freeswith user $PATH? Try starting it yourself or run an erl shell with the -sname or -name option.  Shutting down.\n");
-		prefs.done = 1;
-	} else {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Connected to epmd and published erlang cnode name %s at port %d\n", ec.thisnodename, prefs.port);
-
-		/* we are listening on a socket, configured the erlang interface, and published our node name to ip:port mapping... we are ready! */
-		listen_list.ready = 1;        
-	}
+	/* TODO: move this into switch_apr as something like switch_os_sock_get(switch_os_sock_t *sockfd, switch_socket_t *sock); */
+	apr_os_sock_get((apr_os_sock_t *) & sockfd, (apr_socket_t *) acceptor.sock);
 
 	/* accept connections, negotiate cookies with the connecting node, then spawn two new threads for the node (one to send message to it and one to receive) */
-	while (!prefs.done) {
+	while (switch_test_flag(&globals, LFLAG_RUNNING)) {
 		/* zero out errno because ei_accept doesn't differentiate between a */
 		/* failed authentication or a socket failure, or a client version */
 		/* mismatch or a godzilla attack (and a godzilla attack is highly likely) */
 		errno = 0;
-
-		/* TODO: move this into switch_apr as something like switch_os_sock_get(switch_os_sock_t *sockfd, switch_socket_t *sock); */
-		apr_os_sock_get((apr_os_sock_t *) & sockfd, (apr_socket_t *) listen_list.sock);
 
 		/* wait here for an erlang node to connect, timming out to check if our module is still running every now-and-again */
 		if ((clientfd = ei_accept_tmo(&ec, (int) sockfd, &conn, 498)) == ERL_ERROR) {
@@ -859,7 +844,7 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime) {
 			continue;
 		}
 
-		if (prefs.done) {
+		if (!switch_test_flag(&globals, LFLAG_RUNNING)) {
 			break;
 		}
 
@@ -879,6 +864,7 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime) {
 
 		/* create a mutex and some queues for the work we will be doing to process events */
 		switch_thread_rwlock_create(&listener->rwlock, listener_pool);
+		switch_queue_create(&listener->fetch_queue, MAX_QUEUE_LEN, listener_pool);
 		switch_queue_create(&listener->event_queue, MAX_QUEUE_LEN, listener_pool);
 		switch_queue_create(&listener->log_queue, MAX_QUEUE_LEN, listener_pool);
 
@@ -897,10 +883,9 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime) {
 		switch_set_flag(listener, LFLAG_RUNNING);
 
 		/* create a mutex to controll access to the flags */
-		switch_mutex_init(&listener->flag_mutex, SWITCH_MUTEX_NESTED, listener->pool);
+		switch_mutex_init(&listener->flag_mutex, SWITCH_MUTEX_DEFAULT, listener->pool);
 
 		/* create a bunch of hashes for tracking things like bindings and such */
-		switch_core_hash_init(&listener->event_hash, listener->pool);
 		switch_core_hash_init(&listener->event_bindings, listener->pool);
 		switch_core_hash_init(&listener->session_bindings, listener->pool);
 		switch_core_hash_init(&listener->log_bindings, listener->pool);
@@ -915,39 +900,30 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime) {
 		/* Go do some real work - start the threads for this erlang node! */
 		launch_erl_to_fs_thread(listener);
 		launch_fs_to_erl_thread(listener);
+
+        listener = NULL;
 	}
 
-	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "Erlang connection acceptor shutting down\n");
-
-	/* TODO: stop listeners?  seems to make sense to do so... */
-
 	if (epmdfd) {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Closing epmd socket\n");
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "Closing epmd socket\n");
 		close_socketfd(&epmdfd);
 	}
 
-	if (listen_list.sock) {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Closing listening socket %s:%u\n", prefs.ip, prefs.port);
-		close_socket(&listen_list.sock);
+	if (acceptor.sock) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "Closing listening socket %s:%u\n", prefs.ip, prefs.port);
+		close_socket(&acceptor.sock);
 	}
-
-	/* Close the port we reserved for uPnP/Switch behind firewall, if necessary */
-	if (prefs.nat_map && switch_nat_get_type()) {
-		switch_nat_del_mapping(prefs.port, SWITCH_NAT_TCP);
-	}
-
-	switch_safe_free(prefs.ip);
-	switch_safe_free(prefs.ei_cookie);
-	switch_safe_free(prefs.ei_nodename);
 
 	/* Free our memory pool for handling sockets */
 	if (pool) {
 		switch_core_destroy_memory_pool(&pool);
 	}
 
-	for (uint32_t x = 0; x < prefs.acl_count; x++) {
-		switch_safe_free(prefs.acl[x]);
-	}
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Erlang connection acceptor shut down\n");
+
+	switch_mutex_lock(acceptor.listeners_mutex);
+	prefs.threads--;
+	switch_mutex_unlock(acceptor.listeners_mutex);
 
 	return SWITCH_STATUS_TERM;
 }

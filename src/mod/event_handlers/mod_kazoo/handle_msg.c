@@ -38,6 +38,134 @@
 #include <ei.h>
 #include "mod_kazoo.h"
 
+struct api_command_struct {
+	char *api_cmd;
+	char *arg;
+	listener_t *listener;
+	char uuid_str[SWITCH_UUID_FORMATTED_LENGTH + 1];
+	uint8_t bg;
+	erlang_pid pid;
+	switch_memory_pool_t *pool;
+};
+
+static void *SWITCH_THREAD_FUNC api_exec(switch_thread_t *thread, void *obj)
+{
+	switch_bool_t r = SWITCH_TRUE;
+	struct api_command_struct *acs = (struct api_command_struct *) obj;
+	switch_stream_handle_t stream = { 0 };
+	char *reply, *freply = NULL;
+	switch_status_t status;
+	listener_t *listener = NULL;
+
+	if (!acs || !acs->listener) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Internal error\n");
+		return NULL;
+	}
+
+	listener = acs->listener;
+
+	if(!switch_test_flag(listener, LFLAG_RUNNING) || !switch_test_flag(&globals, LFLAG_RUNNING)) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Ignoring command while shuting down\n");
+		return NULL;
+	}
+
+	if(switch_thread_rwlock_rdlock(listener->rwlock) != SWITCH_STATUS_SUCCESS) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Unable to get read lock for listener\n");
+		goto done;
+	}
+
+	SWITCH_STANDARD_STREAM(stream);
+
+	if ((status = switch_api_execute(acs->api_cmd, acs->arg, NULL, &stream)) == SWITCH_STATUS_SUCCESS) {
+		reply = stream.data;
+	} else {
+		freply = switch_mprintf("%s: Command not found!\n", acs->api_cmd);
+		reply = freply;
+		r = SWITCH_FALSE;
+	}
+
+	if (!reply) {
+		reply = "Command returned no output!";
+		r = SWITCH_FALSE;
+	}
+
+	if (*reply == '-')
+		r = SWITCH_FALSE;
+
+	if (acs->bg) {
+		switch_event_t *event;
+
+		if (switch_event_create(&event, SWITCH_EVENT_BACKGROUND_JOB) == SWITCH_STATUS_SUCCESS) {
+			ei_x_buff ebuf;
+
+			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Job-UUID", acs->uuid_str);
+			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Job-Command", acs->api_cmd);
+
+			ei_x_new_with_version(&ebuf);
+
+			if (acs->arg) {
+				switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Job-Command-Arg", acs->arg);
+			}
+
+			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Job-Successful", r ? "true" : "false");
+			switch_event_add_body(event, "%s", reply);
+
+			switch_event_fire(&event);
+
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Sending bgapi reply to %s\n", acs->pid.node);
+
+			ei_x_encode_tuple_header(&ebuf, 3);
+
+			if (r)
+				ei_x_encode_atom(&ebuf, "bgok");
+			else
+				ei_x_encode_atom(&ebuf, "bgerror");
+
+			_ei_x_encode_string(&ebuf, acs->uuid_str);
+			_ei_x_encode_string(&ebuf, reply);
+
+			ei_helper_send(listener, &acs->pid, &ebuf);
+
+			ei_x_free(&ebuf);
+		}
+	} else {
+		ei_x_buff rbuf;
+		ei_x_new_with_version(&rbuf);
+		ei_x_encode_tuple_header(&rbuf, 2);
+
+		if (!strlen(reply)) {
+			reply = "Command returned no output!";
+			r = SWITCH_FALSE;
+		}
+
+		if (r) {
+			ei_x_encode_atom(&rbuf, "ok");
+		} else {
+			ei_x_encode_atom(&rbuf, "error");
+		}
+
+		_ei_x_encode_string(&rbuf, reply);
+
+		ei_helper_send(listener, &acs->pid, &rbuf);
+
+		ei_x_free(&rbuf);
+	}
+
+	switch_safe_free(stream.data);
+	switch_safe_free(freply);
+
+	switch_thread_rwlock_unlock(listener->rwlock);
+
+  done:
+	if (acs->bg) {
+		switch_memory_pool_t *pool = acs->pool;
+		acs = NULL;
+		switch_core_destroy_memory_pool(&pool);
+		pool = NULL;
+	}
+	return NULL;
+}
+
 static switch_status_t handle_msg_nixevent(listener_t *listener, erlang_msg * msg, int arity, ei_x_buff * buf, ei_x_buff * rbuf) {
     char atom[MAXATOMLEN];
 
@@ -113,14 +241,118 @@ static switch_status_t handle_msg_event(listener_t *listener, erlang_msg * msg, 
     return SWITCH_STATUS_SUCCESS;
 }
 
-/* TODO: REFACTOR */
 static switch_status_t handle_msg_fetch_reply(listener_t *listener, ei_x_buff * buf, ei_x_buff * rbuf) {
+	int type, size;
+    char uuid_str[SWITCH_UUID_FORMATTED_LENGTH + 1];
+	char *xml_str;
+	switch_xml_t xml = NULL;
+	xml_fetch_msg_t *fetch_msg = NULL;
+
+	/* Try to get the fetch uuid string */
+	ei_get_type(buf->buff, &buf->index, &type, &size);
+
+	if (type != ERL_NIL_EXT && type != ERL_STRING_EXT && type != ERL_BINARY_EXT) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "XML fetch response did not contain decodable uuid (was type %d of size %d)\n", type, size);
+		ei_x_encode_tuple_header(rbuf, 2);
+		ei_x_encode_atom(rbuf, "error");
+		ei_x_encode_atom(rbuf, "badarg");
+		return SWITCH_STATUS_SUCCESS;
+	}
+
+	ei_decode_string_or_binary(buf->buff, &buf->index, SWITCH_UUID_FORMATTED_LENGTH, uuid_str);
+
+	if (!(fetch_msg = switch_core_hash_find_locked(globals.fetch_resp_hash, uuid_str, globals.fetch_resp_mutex))) {
+		ei_x_encode_tuple_header(rbuf, 2);
+		ei_x_encode_atom(rbuf, "error");
+		ei_x_encode_atom(rbuf, "baduuid");
+		return SWITCH_STATUS_SUCCESS;
+	}
+
+	if (switch_mutex_trylock(fetch_msg->mutex) != SWITCH_STATUS_SUCCESS) {
+		ei_x_encode_tuple_header(rbuf, 2);
+		ei_x_encode_atom(rbuf, "error");
+		ei_x_encode_atom(rbuf, "baduuid");
+		return SWITCH_STATUS_SUCCESS;
+	}
+
+	/* Try to get the XML string */
+	ei_get_type(buf->buff, &buf->index, &type, &size);
+
+	if (type == ERL_NIL_EXT && type != ERL_STRING_EXT && type != ERL_BINARY_EXT) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "XML fetch response did not contain decodable XML (was type %d of size %d)\n", type, size);
+		ei_x_encode_tuple_header(rbuf, 2);
+		ei_x_encode_atom(rbuf, "error");
+		ei_x_encode_atom(rbuf, "badarg");
+		return SWITCH_STATUS_SUCCESS;
+	}
+
+	if (!(xml_str = malloc(size + 1))) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CRIT, "Memory Error\n");
+		return SWITCH_STATUS_NOOP;
+	}
+
+	ei_decode_string_or_binary(buf->buff, &buf->index, size, xml_str);
+
+	/* If we succeed in parsing the xml_str, it will be free'd by the core */
+	if ((xml = switch_xml_parse_str_dynamic(xml_str, SWITCH_FALSE))) {
+		fetch_msg->xml = xml;
+		switch_thread_cond_signal(fetch_msg->response_available);
+		switch_mutex_unlock(fetch_msg->mutex);
+		ei_x_encode_atom(rbuf, "ok");
+	} else {
+		switch_safe_free(xml_str);
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Error parsing fetch response XML\n");
+		ei_x_encode_tuple_header(rbuf, 2);
+		ei_x_encode_atom(rbuf, "error");
+		ei_x_encode_atom(rbuf, "badarg");
+	}
+
     return SWITCH_STATUS_SUCCESS;
 }
 
-/* TODO: REFACTOR */
-static switch_status_t handle_msg_api(listener_t *listener, erlang_msg * msg, int arity, ei_x_buff * buf, ei_x_buff * rbuf) {
-    return SWITCH_STATUS_SUCCESS;
+static switch_status_t handle_msg_api(listener_t *listener, erlang_msg *msg, int arity, ei_x_buff *buf, ei_x_buff *rbuf) {
+	struct api_command_struct acs = { 0 };
+	char api_cmd[MAXATOMLEN];
+	int type;
+	int size;
+	char *arg;
+
+	if (arity < 3) {
+		ei_x_encode_tuple_header(rbuf, 2);
+		ei_x_encode_atom(rbuf, "error");
+		ei_x_encode_atom(rbuf, "badarg");
+		return SWITCH_STATUS_SUCCESS;
+	}
+
+	ei_get_type(buf->buff, &buf->index, &type, &size);
+
+	if ((size > (sizeof(api_cmd) - 1)) || ei_decode_atom(buf->buff, &buf->index, api_cmd)) {
+		ei_x_encode_tuple_header(rbuf, 2);
+		ei_x_encode_atom(rbuf, "error");
+		ei_x_encode_atom(rbuf, "badarg");
+		return SWITCH_STATUS_SUCCESS;
+	}
+
+	ei_get_type(buf->buff, &buf->index, &type, &size);
+	arg = malloc(size + 1);
+
+	if (ei_decode_string(buf->buff, &buf->index, arg)) {
+		switch_safe_free(arg);
+		ei_x_encode_tuple_header(rbuf, 2);
+		ei_x_encode_atom(rbuf, "error");
+		ei_x_encode_atom(rbuf, "badarg");
+		return SWITCH_STATUS_SUCCESS;
+	}
+
+	acs.listener = listener;
+	acs.api_cmd = api_cmd;
+	acs.arg = arg;
+	acs.bg = 0;
+	acs.pid = msg->from;
+	api_exec(NULL, (void *) &acs);
+	
+	switch_safe_free(arg);
+	return SWITCH_STATUS_NOOP;
 }
 
 /* TODO: REFACTOR */
@@ -138,9 +370,20 @@ static switch_status_t handle_msg_sendmsg(listener_t *listener, int arity, ei_x_
     return SWITCH_STATUS_SUCCESS;
 }
 
-/* TODO: REFACTOR */
 static switch_status_t handle_msg_bind(listener_t *listener, erlang_msg * msg, ei_x_buff * buf, ei_x_buff * rbuf) {
-    return SWITCH_STATUS_SUCCESS;
+	char section_str[MAXATOMLEN];
+	switch_xml_section_t section;
+
+	if (ei_decode_atom(buf->buff, &buf->index, section_str) || !(section = switch_xml_parse_section_string(section_str))) {
+		ei_x_encode_tuple_header(rbuf, 2);
+		ei_x_encode_atom(rbuf, "error");
+		ei_x_encode_atom(rbuf, "badarg");
+	} else {
+		add_fetch_binding(listener, section_str, &msg->from);
+		ei_x_encode_atom(rbuf, "ok");
+	}
+
+	return SWITCH_STATUS_SUCCESS;
 }
 
 /* NOTE: this does NOT support mod_erlang_event handlecall/3, pid only */
@@ -158,17 +401,13 @@ static switch_status_t handle_msg_handlecall(listener_t *listener, erlang_msg * 
             } else {
                 ei_x_encode_tuple_header(rbuf, 2);
                 ei_x_encode_atom(rbuf, "error");
-                ei_x_encode_atom(rbuf, "badsession");
+                ei_x_encode_atom(rbuf, "baduuid");
             }
         } else {
             ei_x_encode_tuple_header(rbuf, 2);
             ei_x_encode_atom(rbuf, "error");
             ei_x_encode_atom(rbuf, "baduuid");
         }
-    } else if (arity == 3) {
-        ei_x_encode_tuple_header(rbuf, 2);
-        ei_x_encode_atom(rbuf, "error");
-        ei_x_encode_atom(rbuf, "not_implemented");
     } else {
         ei_x_encode_tuple_header(rbuf, 2);
         ei_x_encode_atom(rbuf, "error");
@@ -228,7 +467,7 @@ static switch_status_t handle_msg_tuple(listener_t *listener, erlang_msg * msg, 
         } else {
             ei_x_encode_tuple_header(rbuf, 2);
             ei_x_encode_atom(rbuf, "error");
-            ei_x_encode_atom(rbuf, "undef");
+            ei_x_encode_atom(rbuf, "badarg");
         }
     }
 
@@ -271,7 +510,7 @@ static switch_status_t handle_msg_atom(listener_t *listener, erlang_msg * msg, e
     } else {
         ei_x_encode_tuple_header(rbuf, 2);
         ei_x_encode_atom(rbuf, "error");
-        ei_x_encode_atom(rbuf, "undef");
+        ei_x_encode_atom(rbuf, "badarg");
     }
 
     return ret;
@@ -283,6 +522,8 @@ static switch_status_t handle_net_kernel_msg(listener_t *listener, erlang_msg * 
     char atom[MAXATOMLEN];
     erlang_ref ref;
     erlang_pid pid;
+
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Received net_kernel message, attempting to reply\n");
 
     buf->index = 0;
     ei_decode_version(buf->buff, &buf->index, &version);
@@ -357,7 +598,7 @@ static switch_status_t handle_net_kernel_msg(listener_t *listener, erlang_msg * 
     ei_x_encode_ref(rbuf, &ref);
     ei_x_encode_atom(rbuf, "yes");
 
-    ei_helper_send(listener, &pid, rbuf->buff, rbuf->index);
+    ei_helper_send(listener, &pid, rbuf);
 
     return SWITCH_STATUS_NOOP;
 }
@@ -392,7 +633,7 @@ switch_status_t handle_msg(listener_t *listener, erlang_msg * msg, ei_x_buff * b
                         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "Received unexpected erlang tuple, first element of type %d\n", type2);
                         ei_x_encode_tuple_header(rbuf, 2);
                         ei_x_encode_atom(rbuf, "error");
-                        ei_x_encode_atom(rbuf, "undef");
+                        ei_x_encode_atom(rbuf, "badarg");
                         break;
                 }
                 break;
@@ -404,18 +645,18 @@ switch_status_t handle_msg(listener_t *listener, erlang_msg * msg, ei_x_buff * b
                 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "Received unexpected erlang term, started with type %d\n", type);
                 ei_x_encode_tuple_header(rbuf, 2);
                 ei_x_encode_atom(rbuf, "error");
-                ei_x_encode_atom(rbuf, "undef");
+                ei_x_encode_atom(rbuf, "badarg");
                 break;
         }
     }
 
     /* TODO: tmp debug line but should be added to an API call for listing pid bindings... */
-    list_event_bindings(listener);
+//    list_event_bindings(listener);
 
     if (ret == SWITCH_STATUS_NOOP) {
         ret = SWITCH_STATUS_SUCCESS;
     } else if (rbuf->index > 1) {
-        ei_helper_send(listener, &msg->from, rbuf->buff, rbuf->index);
+        ei_helper_send(listener, &msg->from, rbuf);
     }
 
     return ret;
