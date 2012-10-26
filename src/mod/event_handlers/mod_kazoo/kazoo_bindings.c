@@ -203,6 +203,162 @@ switch_status_t flush_fetch_bindings(listener_t *listener) {
 }
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+switch_status_t has_session_bindings(listener_t *listener, char *uuid_str) {
+    /* just check if the hash has an entry for this uuid, dont really care */
+    /* what value/pids/ect are there yet */
+    if (switch_core_hash_find(listener->session_bindings, uuid_str)) {
+        return SWITCH_STATUS_FOUND;
+    } else {
+        return SWITCH_STATUS_NOTFOUND;
+    }
+}
+
+switch_status_t add_session_binding(listener_t *listener, char *uuid_str, erlang_pid *from) {
+    switch_hash_t *bindings;
+    erlang_pid *pid;
+    switch_status_t status = SWITCH_STATUS_SUCCESS;
+    char key[MAX_PID_CHARS];
+
+    switch_snprintf(key, sizeof(key), "<%d.%d.%d>", from->creation, from->num, from->serial);
+    pid = malloc(sizeof(erlang_pid));
+    memcpy(pid, from, sizeof(erlang_pid));
+
+    if ((bindings = switch_core_hash_find(listener->session_bindings, uuid_str))) {
+        /* if the session_bindings hash has a hash as the value already just insert the pid into the sub-hash */
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "Creating erlang (%s) <%d.%d.%d> session binding for %s\n",
+                listener->peer_nodename, pid->creation, pid->num, pid->serial, uuid_str);
+        status = switch_core_hash_insert(bindings, key, pid);
+    } else {
+        /* if the session_bindings hash doesnt have a value for this session, create a new hash with the pid then store the new hash in session_bindings */
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "Creating erlang (%s) <%d.%d.%d> intial session binding for %s\n",
+                listener->peer_nodename, pid->creation, pid->num, pid->serial, uuid_str);
+        switch_core_hash_init(&bindings, listener->pool);
+        switch_core_hash_insert(bindings, key, pid);
+        status = switch_core_hash_insert(listener->session_bindings, uuid_str, bindings);
+    }
+
+    ei_link(listener, ei_self(listener->ec), from);
+    
+    return status;
+}
+
+switch_status_t remove_pid_from_session_binding(listener_t *listener, char *uuid_str, erlang_pid *from) {
+    switch_hash_t *bindings;
+
+    if ((bindings = switch_core_hash_find(listener->session_bindings, uuid_str))) {
+        erlang_pid *pid;
+        char remove_key[MAX_PID_CHARS];
+
+        /* if session_bindings has an hash value for this uuid_str type remove pid from the sub-hash */
+        switch_snprintf(remove_key, sizeof(remove_key), "<%d.%d.%d>", from->creation, from->num, from->serial);
+
+        if ((pid = (erlang_pid *)switch_core_hash_find(bindings, remove_key))) {
+            switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removed erlang (%s) <%d.%d.%d> binding for %s\n", listener->peer_nodename, pid->creation, pid->num, pid->serial, uuid_str);
+            switch_core_hash_delete(bindings, remove_key);
+            switch_safe_free(pid);
+        }
+    }
+
+    return SWITCH_STATUS_SUCCESS;
+}
+
+switch_status_t remove_pid_from_session_bindings(listener_t *listener, erlang_pid *from) {
+    switch_hash_index_t *uuid_strs;
+    switch_hash_t *bindings;
+    char remove_key[MAX_PID_CHARS];
+
+    switch_snprintf(remove_key, sizeof(remove_key), "<%d.%d.%d>", from->creation, from->num, from->serial);
+
+    /* loop over all session_bindings removing the pid from the hash found as the value */
+    for (uuid_strs = switch_hash_first(NULL, listener->session_bindings); uuid_strs; uuid_strs = switch_hash_next(uuid_strs)) {
+        erlang_pid *pid;
+        const void *key;
+        void *value;
+
+        switch_hash_this(uuid_strs, &key, NULL, &value);
+        bindings = (switch_hash_t*) value;
+
+        if ((pid = (erlang_pid *) switch_core_hash_find(bindings, remove_key))) {
+            switch_core_hash_delete(bindings, remove_key);
+            switch_safe_free(pid);
+        }
+    }
+
+    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removed erlang (%s) <%d.%d.%d> session bindings\n", listener->peer_nodename, from->creation, from->num, from->serial);
+
+    return SWITCH_STATUS_SUCCESS;
+}
+
+switch_status_t flush_session_bindings(listener_t *listener) {
+    switch_hash_index_t *uuid_strs;
+    switch_hash_t *bindings;
+
+    /* loop over all session_bindings removing all hashes */
+    for (uuid_strs = switch_hash_first(NULL, listener->session_bindings); uuid_strs; uuid_strs = switch_hash_next(uuid_strs)) {
+        const void *key;
+        void *value;
+
+        switch_hash_this(uuid_strs, &key, NULL, &value);
+        bindings = (switch_hash_t*) value;
+
+        /* free all the erlang_pids in this hash, then destroy the hash itself */
+        switch_core_hash_delete_multi(bindings, bindings_pid_cleanup_callback, NULL);    
+        switch_core_hash_destroy(&bindings);
+    }
+    
+    /* delete all the elements in the session_bindings hash since they they have been destroyed */
+    switch_core_hash_delete_multi(listener->session_bindings, NULL, NULL);
+
+    switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Flushed all erlang session bindings for node %s\n", listener->peer_nodename);
+
+    return SWITCH_STATUS_SUCCESS;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 switch_status_t has_event_bindings(listener_t *listener, switch_event_t *event) {
     const char *event_name;
 

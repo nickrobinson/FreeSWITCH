@@ -109,6 +109,13 @@ switch_status_t remove_pid_from_fetch_binding(listener_t *listener, char *sectio
 switch_status_t remove_pid_from_fetch_bindings(listener_t *listener, erlang_pid *from);
 switch_status_t flush_fetch_bindings(listener_t *listener);
 
+switch_status_t has_session_bindings(listener_t *listener, char *uuid_str);
+switch_status_t send_session_to_bindings(listener_t *listener, char *uuid_str);
+switch_status_t add_session_binding(listener_t *listener, char *uuid_str, erlang_pid *from);
+switch_status_t remove_pid_from_session_binding(listener_t *listener, char *uuid_str, erlang_pid *from);
+switch_status_t remove_pid_from_session_bindings(listener_t *listener, erlang_pid *from);
+switch_status_t flush_session_bindings(listener_t *listener);
+
 switch_status_t has_event_bindings(listener_t *listener, switch_event_t *event);
 switch_status_t send_event_to_bindings(listener_t *listener, switch_event_t *event);
 switch_status_t add_event_binding(listener_t *listener, switch_event_types_t *type, erlang_pid *from);
@@ -129,7 +136,9 @@ void ei_x_print_msg(ei_x_buff * buf, erlang_pid * pid, int send);
 int ei_helper_send(listener_t *listener, erlang_pid* to, ei_x_buff *buf);
 void ei_hash_ref(erlang_ref * ref, char *output);
 int ei_compare_pids(erlang_pid * pid1, erlang_pid * pid2);
-int ei_decode_string_or_binary(char *buf, int *index, int maxlen, char *dst);
+int ei_decode_atom_safe(char *buf, int *index, char *dst);
+int ei_decode_string_or_binary_limited(char *buf, int *index, int maxsize, char *dst);
+int ei_decode_string_or_binary(char *buf, int *index, char **dst);
 switch_status_t initialize_ei(struct ei_cnode_s *ec, switch_sockaddr_t *sa, prefs_t *prefs);
 
 #define ei_encode_switch_event(_b, _e) ei_encode_switch_event_tag(_b, _e, "event");

@@ -202,19 +202,69 @@ int ei_compare_pids(erlang_pid * pid1, erlang_pid * pid2) {
     }
 }
 
-int ei_decode_string_or_binary(char *buf, int *index, int maxlen, char *dst) {
+int ei_decode_atom_safe(char *buf, int *index, char *dst) {
+    int type, size;
+
+    ei_get_type(buf, index, &type, &size);
+	
+	if (type != ERL_ATOM_EXT) {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Unexpected erlang term type %d (size %d), needed atom\n", type, size);
+        return -1;
+	} else if (size > MAXATOMLEN) {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Requested decoding of atom with size %d into a buffer of size %d\n", size, MAXATOMLEN);
+        return -1;
+	} else {
+		return ei_decode_atom(buf, index, dst);
+	}
+}
+
+int ei_decode_string_or_binary(char *buf, int *index, char **dst) {
     int type, size, res;
     long len;
 
     ei_get_type(buf, index, &type, &size);
 
-    if (type != ERL_STRING_EXT && type != ERL_BINARY_EXT) {
+    if (type != ERL_STRING_EXT && type != ERL_BINARY_EXT && type != ERL_NIL_EXT) {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Unexpected erlang term type %d (size %d), needed binary or string\n", type, size);
         return -1;
-    } else if (size > maxlen) {
-        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Requested decoding of %s with size %d into a buffer of size %d\n",
-                type == ERL_BINARY_EXT ? "binary" : "string", size, maxlen);
+    }
+
+	*dst = malloc(size + 1);
+
+	if (type == ERL_NIL_EXT) {
+		res = 0;
+		**dst = '\0';
+	} else if (type == ERL_BINARY_EXT) {
+        res = ei_decode_binary(buf, index, *dst, &len);
+        (*dst)[len] = '\0'; /* binaries aren't null terminated */
+    } else {
+        res = ei_decode_string(buf, index, *dst);
+    }
+
+    return res;
+}
+
+int ei_decode_string_or_binary_limited(char *buf, int *index, int maxsize, char *dst) {
+    int type, size, res;
+    long len;
+
+    ei_get_type(buf, index, &type, &size);
+
+    if (type != ERL_STRING_EXT && type != ERL_BINARY_EXT && type != ERL_NIL_EXT) {
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Unexpected erlang term type %d (size %d), needed binary or string\n", type, size);
         return -1;
-    } else if (type == ERL_BINARY_EXT) {
+    }
+
+	if (size > maxsize) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Requested decoding of %s with size %d into a buffer of size %d\n",
+						  type == ERL_BINARY_EXT ? "binary" : "string", size, maxsize);
+		return -1;
+	}
+
+	if (type == ERL_NIL_EXT) {
+		res = 0;
+		dst = '\0';
+	} else if (type == ERL_BINARY_EXT) {
         res = ei_decode_binary(buf, index, dst, &len);
         dst[len] = '\0'; /* binaries aren't null terminated */
     } else {

@@ -46,6 +46,7 @@ static struct {
 	switch_mutex_t *sock_mutex;
 	listener_t *listeners;
 	switch_mutex_t *listeners_mutex;
+//	uint8_t fetch_handler;
 	uint8_t ready;
 } acceptor;
 
@@ -68,6 +69,7 @@ static switch_status_t log_handler(const switch_log_node_t *node, switch_log_lev
 */
 
 static void event_handler(switch_event_t *event) {
+	char *uuid_str = switch_event_get_header(event, "unique-id");
 	listener_t *listener;
 
 	switch_assert(event != NULL);
@@ -83,10 +85,11 @@ static void event_handler(switch_event_t *event) {
 
 		/* if this listener has erlang process that are bound to this event type then */
 		/* set the flag to duplicate the event into the listener event queue */
-		if (has_event_bindings(listener, event) == SWITCH_STATUS_FOUND) {
+		if (!zstr(uuid_str) && has_session_bindings(listener, uuid_str) == SWITCH_STATUS_FOUND) {
+			send = 1;
+		} else if (has_event_bindings(listener, event) == SWITCH_STATUS_FOUND) {
 			send = 1;
 		}
-		/* TODO: check if the UUID of the event is in listener->session_bindings */
 
 		if (send) {
 			if (switch_event_dup(&clone, event) == SWITCH_STATUS_SUCCESS) {
@@ -165,6 +168,32 @@ static switch_xml_t xml_erlang_fetch(const char *section, const char *tag_name, 
 
 	return xml;
 }
+
+/*
+static switch_xml_t xml_erlang_fetch_2(const char *section, const char *tag_name, const char *key_name, const char *key_value, switch_event_t *params,
+		void *user_data)
+{
+	if (acceptor.fetch_handler == 1) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "FETCH2 Received a request for XML - %s / %s / %s = %s\n", section, tag_name, key_name, key_value);
+		acceptor.fetch_handler = 0;
+		return xml_erlang_fetch(section, tag_name, key_name, key_value, params, user_data);
+	} else {
+		return NULL;
+	}
+}
+
+static switch_xml_t xml_erlang_fetch_1(const char *section, const char *tag_name, const char *key_name, const char *key_value, switch_event_t *params,
+		void *user_data)
+{
+	if (acceptor.fetch_handler == 0) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "FETCH1 Received a request for XML - %s / %s / %s = %s\n", section, tag_name, key_name, key_value);
+		acceptor.fetch_handler ++;
+		return xml_erlang_fetch(section, tag_name, key_name, key_value, params, user_data);
+	} else {
+		return NULL;
+	}
+}
+*/
 
 static void close_socket(switch_socket_t ** sock) {
 	switch_mutex_lock(acceptor.sock_mutex);
