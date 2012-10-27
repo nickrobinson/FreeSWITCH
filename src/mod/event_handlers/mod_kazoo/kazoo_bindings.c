@@ -194,6 +194,7 @@ switch_status_t send_fetch_to_bindings(listener_t *listener, char *uuid_str) {
 	switch_thread_rwlock_rdlock(listener->fetch_rwlock);
     if ((bindings = switch_core_hash_find(listener->fetch_bindings, section))) {
 		ei_x_buff ebuf;
+		int start_index;
 
 		ei_x_new_with_version(&ebuf);
 		
@@ -214,6 +215,7 @@ switch_status_t send_fetch_to_bindings(listener_t *listener, char *uuid_str) {
 		switch_thread_rwlock_unlock(globals.fetch_resp_lock);
 
         /* loop over all the entries of this sub-hash and send the fetch request to each */
+		start_index = ebuf.index;
         for (binding = switch_hash_first(NULL, bindings); binding; binding = switch_hash_next(binding)) {
             erlang_pid *pid;
             const void *key;
@@ -225,7 +227,7 @@ switch_status_t send_fetch_to_bindings(listener_t *listener, char *uuid_str) {
             switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Sending erlang (%s) <%d.%d.%d> fetch request %s: %s / %s / %s = %s\n"
 							  ,listener->peer_nodename, pid->creation, pid->num, pid->serial, uuid_str, section, tag_name, key_name, key_value);
 
-            /* TODO: not sure if you can "reuse" the ebuf after sending... */
+			ebuf.index = start_index;
             ei_helper_send(listener, pid, &ebuf);
 		}
 
@@ -423,6 +425,8 @@ switch_status_t send_event_to_bindings(listener_t *listener, switch_event_t *eve
 		switch_thread_rwlock_rdlock(listener->session_rwlock);
 		if ((bindings = switch_core_hash_find(listener->session_bindings, uuid_str))) {
 			ei_x_buff ebuf;
+			int start_index;
+
 			ei_x_new_with_version(&ebuf);
 
 			ei_x_encode_tuple_header(&ebuf, 2);
@@ -430,6 +434,7 @@ switch_status_t send_event_to_bindings(listener_t *listener, switch_event_t *eve
 			ei_encode_switch_event(&ebuf, event);
 
 			/* loop over all the entries of this sub-hash and send the event to each */
+			start_index = ebuf.index;
 			for (binding = switch_hash_first(NULL, bindings); binding; binding = switch_hash_next(binding)) {
 				erlang_pid *pid;
 				const void *key;
@@ -437,8 +442,8 @@ switch_status_t send_event_to_bindings(listener_t *listener, switch_event_t *eve
 				
 				switch_hash_this(binding, &key, NULL, &value);
 				pid = (erlang_pid*) value;
-			
-				/* TODO: not sure if you can "reuse" the ebuf after sending... */
+
+				ebuf.index = start_index;
 				ei_helper_send(listener, pid, &ebuf);
 			}
 			ei_x_free(&ebuf);
@@ -449,11 +454,14 @@ switch_status_t send_event_to_bindings(listener_t *listener, switch_event_t *eve
     switch_thread_rwlock_rdlock(listener->event_rwlock);
 	if ((bindings = switch_core_hash_find(listener->event_bindings, event_name))) {
 		ei_x_buff ebuf;
+		int start_index;
+
 		ei_x_new_with_version(&ebuf);
 
 		ei_encode_switch_event(&ebuf, event);
 
 		/* loop over all the entries of this sub-hash and send the event to each */
+		start_index = ebuf.index;
 		for (binding = switch_hash_first(NULL, bindings); binding; binding = switch_hash_next(binding)) {
 			erlang_pid *pid;
 			const void *key;
@@ -462,7 +470,7 @@ switch_status_t send_event_to_bindings(listener_t *listener, switch_event_t *eve
 			switch_hash_this(binding, &key, NULL, &value);
 			pid = (erlang_pid*) value;
 			
-			/* TODO: not sure if you can "reuse" the ebuf after sending... */
+			ebuf.index = start_index;
 			ei_helper_send(listener, pid, &ebuf);
 		}
 		ei_x_free(&ebuf);
