@@ -1,0 +1,9 @@
+APR=apr
+BASE=../../../..
+
+APR_DIR=$(switch_srcdir)/libs/$(APR)
+
+LOCAL_CFLAGS=-I$(APR_DIR)/include @ERLANG_CFLAGS@ -D_REENTRANT
+LOCAL_LDFLAGS= @ERLANG_LDFLAGS@
+
+include $(BASE)/build/modmake.rules
