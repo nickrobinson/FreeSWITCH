@@ -144,6 +144,13 @@ static switch_status_t erlang_response_baduuid(ei_x_buff * rbuf) {
 	return SWITCH_STATUS_SUCCESS;
 }
 
+static switch_status_t erlang_response_ignored(ei_x_buff * rbuf) {
+	ei_x_encode_tuple_header(rbuf, 2);
+	ei_x_encode_atom(rbuf, "error");
+	ei_x_encode_atom(rbuf, "ignored");
+	return SWITCH_STATUS_SUCCESS;
+}
+
 static switch_status_t erlang_response_notimplemented(ei_x_buff * rbuf) {
 	ei_x_encode_tuple_header(rbuf, 2);
 	ei_x_encode_atom(rbuf, "error");
@@ -395,34 +402,46 @@ static switch_status_t handle_request_fetch_reply(listener_t *listener, erlang_m
 	if (ei_decode_string_or_binary_limited(buf->buff, &buf->index, sizeof(uuid_str), uuid_str)) {
 		return erlang_response_badarg(rbuf);
 	}
-		
-	if (!(fetch_msg = switch_core_hash_find_rdlock(globals.fetch_resp_hash, uuid_str, globals.fetch_resp_lock))) {
-		return erlang_response_baduuid(rbuf);
-	}
-
-	if (switch_mutex_trylock(fetch_msg->mutex) != SWITCH_STATUS_SUCCESS) {
-		return erlang_response_baduuid(rbuf);
-	}
 
 	/* Try to get the XML string */
 	if (ei_decode_string_or_binary(buf->buff, &buf->index, &xml_str)) {
-		return erlang_response_baduuid(rbuf);
+		return erlang_response_badarg(rbuf);
+	}
+
+	if (zstr(xml_str)) {
+	    switch_safe_free(xml_str);
+		return erlang_response_ignored(rbuf);
+    }
+
+    switch_thread_rwlock_rdlock(globals.fetch_resp_lock);
+	if (!(fetch_msg = switch_core_hash_find(globals.fetch_resp_hash, uuid_str))) {
+        switch_thread_rwlock_unlock(globals.fetch_resp_lock);
+	    return erlang_response_baduuid(rbuf);
 	}
 
 	/* If we succeed in parsing the xml_str, it will be free'd by the core */
 	if ((xml = switch_xml_parse_str_dynamic(xml_str, SWITCH_FALSE))) {
 		fetch_msg->xml = xml;
-		switch_thread_cond_signal(fetch_msg->response_available);
-		switch_mutex_unlock(fetch_msg->mutex);
-		ei_x_encode_tuple_header(rbuf, 2);
-		ei_x_encode_atom(rbuf, "ok");
-		_ei_x_encode_string(rbuf, uuid_str);
-		return SWITCH_STATUS_SUCCESS;
 	} else {
-		switch_safe_free(xml_str);
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Error parsing fetch response XML\n");
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Error parsing fetch response XML: %s\n", xml_str);
+        switch_thread_rwlock_unlock(globals.fetch_resp_lock);
+	    switch_safe_free(xml_str);
 		return erlang_response_badarg(rbuf);
 	}
+
+	if (switch_mutex_trylock(fetch_msg->mutex) != SWITCH_STATUS_SUCCESS) {
+        switch_thread_rwlock_unlock(globals.fetch_resp_lock);
+		return erlang_response_ignored(rbuf);
+	}
+
+	switch_thread_cond_signal(fetch_msg->response_available);
+    switch_thread_rwlock_unlock(globals.fetch_resp_lock);
+	switch_mutex_unlock(fetch_msg->mutex);
+
+	ei_x_encode_tuple_header(rbuf, 2);
+	ei_x_encode_atom(rbuf, "ok");
+	_ei_x_encode_string(rbuf, uuid_str);
+	return SWITCH_STATUS_SUCCESS;
 }
 
 void switch_log_sendmsg(switch_core_session_t *session, switch_event_t *event)

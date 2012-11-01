@@ -100,16 +100,16 @@ static void destroy_listener(listener_t *listener) {
 	/* ensure nothing else is still using this listener */
 	switch_thread_rwlock_wrlock(listener->rwlock);
 
-	/* close the client socket */
-	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Closing connection to erlang node %s\n", listener->peer_nodename);
-	close_socketfd(&listener->clientfd);
+	/* flush all bindings */
+	flush_all_bindings(listener);
 
 	/* Now that we are out of the listener_list we can flush our queues */
 	/* since nobody will know about our existence and be unable to add to them */
 	flush_listener(listener, SWITCH_TRUE, SWITCH_TRUE);
 
-	/* flush all bindings */
-	flush_all_bindings(listener);
+	/* close the client socket */
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Closing connection to erlang node %s\n", listener->peer_nodename);
+	close_socketfd(&listener->clientfd);
 
 	switch_thread_rwlock_unlock(listener->rwlock);
 
@@ -218,6 +218,8 @@ static switch_xml_t fetch_handler(const char *section, const char *tag_name, con
 	}
 
 	now = switch_micro_time_now();
+		
+    /* switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Got fetch request: %s / %s / %s = %s\n", section, tag_name, key_name, key_value); */
 
 	switch_thread_rwlock_rdlock(acceptor.listeners_lock);
 	for (listener = acceptor.listeners; listener; listener = listener->next) {
@@ -265,7 +267,7 @@ static switch_xml_t fetch_handler(const char *section, const char *tag_name, con
 			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Fetch request %s reply after %dms\n", fetch_msg->uuid_str, (int) (switch_micro_time_now() - now) / 1000);
 			xml = fetch_msg->xml;
 		} else {
-			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Fetch request %s timeout after %dms\n", fetch_msg->uuid_str, (int) (switch_micro_time_now() - now) / 1000);
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Fetch request %s timeout after %dms\n", fetch_msg->uuid_str, (int) (switch_micro_time_now() - now) / 1000);
 		}
 
 		switch_core_hash_delete_wrlock(globals.fetch_resp_hash, fetch_msg->uuid_str, globals.fetch_resp_lock);
