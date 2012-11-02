@@ -1,9 +1,8 @@
-APR=apr
 BASE=../../../..
 
-APR_DIR=$(switch_srcdir)/libs/$(APR)
-
-LOCAL_CFLAGS=-I$(APR_DIR)/include @ERLANG_CFLAGS@ -D_REENTRANT
+LOCAL_SOURCES=ei_helpers.c kazoo_request.c kazoo_bindings.c
+LOCAL_OBJS=ei_helpers.o kazoo_request.o kazoo_bindings.o
+LOCAL_CFLAGS= @ERLANG_CFLAGS@ -D_REENTRANT -I$(BASE)/libs/apr/include
 LOCAL_LDFLAGS= @ERLANG_LDFLAGS@
 
 include $(BASE)/build/modmake.rules

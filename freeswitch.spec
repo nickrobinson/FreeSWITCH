@@ -945,6 +945,16 @@ BuildRequires:	erlang
 %description event-erlang-event
 Erlang Event Module for FreeSWITCH.
 
+%package event-kazoo
+Summary:	Alternative Erlang Event Module for the FreeSWITCH open source telephony platform
+Group:		System/Libraries
+Requires:	 %{name} = %{version}-%{release}
+Requires:	erlang
+BuildRequires:	erlang
+
+%description event-kazoo
+Alternative Erlang Event Module for FreeSWITCH.
+
 %package event-multicast
 Summary:	Multicast Event System for the FreeSWITCH open source telephony platform
 Group:		System/Libraries
@@ -1350,7 +1360,7 @@ ENDPOINTS_MODULES="endpoints/mod_dingaling ../../libs/freetdm/mod_freetdm \
 #
 ######################################################################################################################
 EVENT_HANDLERS_MODULES="event_handlers/mod_cdr_csv event_handlers/mod_cdr_pg_csv event_handlers/mod_cdr_sqlite \
-			event_handlers/mod_cdr_mongodb event_handlers/mod_erlang_event event_handlers/mod_event_multicast \
+			event_handlers/mod_cdr_mongodb event_handlers/mod_kazoo event_handlers/mod_erlang_event event_handlers/mod_event_multicast \
 			event_handlers/mod_event_socket event_handlers/mod_json_cdr \
 			event_handlers/mod_snmp"
 
@@ -2147,6 +2157,10 @@ fi
 %files event-erlang-event
 %defattr(-, freeswitch, daemon)
 %{MODINSTDIR}/mod_erlang_event.so*
+
+%files event-kazoo
+%defattr(-, freeswitch, daemon)
+%{MODINSTDIR}/mod_kazoo.so*
 
 %files event-multicast
 %defattr(-, freeswitch, daemon)
