@@ -104,6 +104,7 @@ typedef struct globals_s globals_t;
 switch_status_t flush_all_bindings(listener_t *listener);
 switch_status_t remove_pid_from_all_bindings(listener_t *listener, erlang_pid *from);
 
+switch_status_t display_fetch_bindings(listener_t *listener, switch_stream_handle_t *stream);
 switch_status_t has_fetch_bindings(listener_t *listener, const char *section);
 switch_status_t send_fetch_to_bindings(listener_t *listener, char *uuid_str);
 switch_status_t add_fetch_binding(listener_t *listener, char *section, erlang_pid *from);
@@ -111,6 +112,8 @@ switch_status_t remove_pid_from_fetch_binding(listener_t *listener, char *sectio
 switch_status_t remove_pid_from_fetch_bindings(listener_t *listener, erlang_pid *from);
 switch_status_t flush_fetch_bindings(listener_t *listener);
 
+int count_session_bindings(listener_t *listener);
+switch_status_t display_session_bindings(listener_t *listener, switch_stream_handle_t *stream);
 switch_status_t has_session_bindings(listener_t *listener, char *uuid_str);
 switch_status_t send_session_to_bindings(listener_t *listener, char *uuid_str);
 switch_status_t add_session_binding(listener_t *listener, char *uuid_str, erlang_pid *from);
@@ -118,6 +121,7 @@ switch_status_t remove_pid_from_session_binding(listener_t *listener, char *uuid
 switch_status_t remove_pid_from_session_bindings(listener_t *listener, erlang_pid *from);
 switch_status_t flush_session_bindings(listener_t *listener);
 
+switch_status_t display_event_bindings(listener_t *listener, switch_stream_handle_t *stream);
 switch_status_t has_event_bindings(listener_t *listener, switch_event_t *event);
 switch_status_t send_event_to_bindings(listener_t *listener, switch_event_t *event);
 switch_status_t add_event_binding(listener_t *listener, char *event_name, erlang_pid *from);

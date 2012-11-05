@@ -93,7 +93,8 @@ static char *ATOM_COMMANDS[] = {
 	"session_noevents",
 	"exit",
 	"getpid",
-	"link"
+	"link",
+	"version"
 };
 
 typedef enum {
@@ -105,6 +106,7 @@ typedef enum {
 	ATOM_EXIT,
 	ATOM_GETPID,
 	ATOM_LINK,
+	ATOM_VERSION,
 	ATOM_MAX
 } atom_commands_t;
 
@@ -780,6 +782,11 @@ static switch_status_t handle_atom_request(listener_t *listener, erlang_msg * ms
 	case ATOM_LINK:		
         ei_link(listener, ei_self(listener->ec), &msg->from);
         return SWITCH_STATUS_NOOP;
+	case ATOM_VERSION:
+        ei_x_encode_tuple_header(rbuf, 2);
+        ei_x_encode_atom(rbuf, "ok");
+		_ei_x_encode_string(rbuf, "mod_kazoo v1.0.0");
+		return SWITCH_STATUS_SUCCESS;
 	default:
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Recieved erlang atom for unimplemented feature: %s\n", atom);
 		return erlang_response_notimplemented(rbuf);

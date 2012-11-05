@@ -153,6 +153,51 @@ switch_status_t flush_bindings(switch_hash_t *bindings, switch_thread_rwlock_t *
     return SWITCH_STATUS_SUCCESS;
 }
 
+switch_status_t display_bindings(switch_hash_t *bindings, switch_thread_rwlock_t *rwlock, switch_stream_handle_t *stream) {
+    switch_hash_index_t *index;
+
+	switch_thread_rwlock_rdlock(rwlock);
+	for (index = switch_hash_first(NULL, bindings); index; index = switch_hash_next(index)) {
+		switch_hash_index_t *sub_index;
+		switch_hash_t *hash;
+		const void *key;
+		void *value;
+
+		switch_hash_this(index, &key, NULL, &value);
+		hash = (switch_hash_t *) value;
+
+		stream->write_function(stream, "  %s:", (const char *)key);
+
+		for (sub_index = switch_hash_first(NULL, hash); sub_index; sub_index = switch_hash_next(sub_index)) {
+			erlang_pid *pid;
+
+			switch_hash_this(sub_index, &key, NULL, &value);
+			pid = (erlang_pid*) value;
+
+			stream->write_function(stream, " <%d.%d.%d> ", pid->creation, pid->num, pid->serial);
+		}
+		stream->write_function(stream, "\n");
+	}
+	switch_thread_rwlock_unlock(rwlock);
+
+	return SWITCH_STATUS_FOUND;
+
+}
+
+int count_bindings(switch_hash_t *bindings, switch_thread_rwlock_t *rwlock) {
+    switch_hash_index_t *index;
+	int count = 0;
+
+	switch_thread_rwlock_rdlock(rwlock);
+
+    for (index = switch_hash_first(NULL, bindings); index; index = switch_hash_next(index)) {
+		count++;
+	}
+
+	switch_thread_rwlock_unlock(rwlock);
+
+	return count;
+}
 
 /**
  * =============================================================================
@@ -161,6 +206,10 @@ switch_status_t flush_bindings(switch_hash_t *bindings, switch_thread_rwlock_t *
  *
  * =============================================================================
  */
+switch_status_t display_fetch_bindings(listener_t *listener, switch_stream_handle_t *stream) {
+	return display_bindings(listener->fetch_bindings, listener->fetch_rwlock, stream);
+}
+
 switch_status_t has_fetch_bindings(listener_t *listener, const char *section) {
     /* just check if the hash has an entry for this uuid, dont really care */
     /* what value/pids/ect are there yet */
@@ -281,6 +330,14 @@ switch_status_t flush_fetch_bindings(listener_t *listener) {
  *
  * =============================================================================
  */
+switch_status_t display_session_bindings(listener_t *listener, switch_stream_handle_t *stream) {
+	return display_bindings(listener->session_bindings, listener->session_rwlock, stream);
+}
+
+int count_session_bindings(listener_t *listener) {
+	return count_bindings(listener->session_bindings, listener->session_rwlock);
+}
+
 switch_status_t has_session_bindings(listener_t *listener, char *uuid_str) {
     /* just check if the hash has an entry for this uuid, dont really care */
     /* what value/pids/ect are there yet */
@@ -331,6 +388,10 @@ switch_status_t flush_session_bindings(listener_t *listener) {
  *
  * =============================================================================
  */
+switch_status_t display_event_bindings(listener_t *listener, switch_stream_handle_t *stream) {
+	return display_bindings(listener->event_bindings, listener->event_rwlock, stream);
+}
+
 char * get_event_hash_key(switch_event_t *event) {
 	/* TODO: this should be something more like "custom {subclass_name}" */
 	/* but I dont want to malloc the memory, and what are the chances the */

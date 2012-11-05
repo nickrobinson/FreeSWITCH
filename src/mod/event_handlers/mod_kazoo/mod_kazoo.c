@@ -59,6 +59,30 @@ static void launch_erl_to_fs_thread(listener_t *listener);
 static void launch_fs_to_erl_thread(listener_t *listener);
 static void stop_listener(listener_t *listener);
 
+static char *API_COMMANDS[] = {
+	"listeners",
+	"sessions",
+	"bindings"
+};
+
+typedef enum {
+    API_CMD_LISTENERS,
+    API_CMD_SESSIONS,
+	API_CMD_BINDINGS,
+	API_CMD_MAX
+} api_commands_t;
+
+static switch_status_t find_api_command(char *arg, int *command) {
+	for (int i = 0; i <= API_CMD_MAX; i++) {
+		if(!strcmp(arg, API_COMMANDS[i])) {
+			*command = i;
+			return SWITCH_STATUS_SUCCESS;
+		}
+	}
+
+	return SWITCH_STATUS_FALSE;
+}
+
 static void close_socket(switch_socket_t ** sock) {
 	if (*sock) {
 		switch_socket_shutdown(*sock, SWITCH_SHUTDOWN_READWRITE);
@@ -608,8 +632,104 @@ static int config(void) {
 	return 0;
 }
 
+switch_status_t api_erlang_listeners(switch_stream_handle_t *stream) {
+	listener_t *listener;
+
+	switch_thread_rwlock_rdlock(acceptor.listeners_lock);
+	for (listener = acceptor.listeners; listener; listener = listener->next) {
+		stream->write_function(stream, "Listener to %s with %d outbound sessions\n"
+							   ,listener->peer_nodename, count_session_bindings(listener));
+	}
+	switch_thread_rwlock_unlock(acceptor.listeners_lock);
+
+	return SWITCH_STATUS_SUCCESS;
+}
+
+switch_status_t api_erlang_sessions(switch_stream_handle_t *stream) {
+	listener_t *listener;
+
+	switch_thread_rwlock_rdlock(acceptor.listeners_lock);
+	for (listener = acceptor.listeners; listener; listener = listener->next) {
+		stream->write_function(stream, "Listener to %s sessions\n", listener->peer_nodename);
+		stream->write_function(stream, "-----------------------------------------------------------\n");
+		display_session_bindings(listener, stream);
+	}
+	switch_thread_rwlock_unlock(acceptor.listeners_lock);
+
+	return SWITCH_STATUS_SUCCESS;
+}
+
+switch_status_t api_erlang_event(switch_stream_handle_t *stream) {
+	listener_t *listener;
+
+	switch_thread_rwlock_rdlock(acceptor.listeners_lock);
+	for (listener = acceptor.listeners; listener; listener = listener->next) {
+		stream->write_function(stream, "Listener to %s bindings\n", listener->peer_nodename);
+		stream->write_function(stream, "-----------------------------------------------------------\n");
+		display_fetch_bindings(listener, stream);
+		display_event_bindings(listener, stream);
+	}
+	switch_thread_rwlock_unlock(acceptor.listeners_lock);
+
+	return SWITCH_STATUS_SUCCESS;
+}
+
+SWITCH_STANDARD_API(exec_api_cmd)
+{
+	char *argv[1024] = { 0 };
+	int command, argc = 0;
+	char *mycmd = NULL;
+
+	const char *usage_string = "USAGE:\n"
+		"--------------------------------------------------------------------------------\n"
+		"erlang listeners\n"
+		"erlang sessions\n"
+		"erlang bindings\n"
+		"--------------------------------------------------------------------------------\n";
+
+	if (zstr(cmd)) {
+		stream->write_function(stream, "%s", usage_string);
+		return SWITCH_STATUS_SUCCESS;
+	}
+
+	if (!(mycmd = strdup(cmd))) {
+		switch_safe_free(mycmd);
+		return SWITCH_STATUS_MEMERR;
+	}
+
+	if (!(argc = switch_separate_string(mycmd, ' ', argv, (sizeof(argv) / sizeof(argv[0]))))) {
+		stream->write_function(stream, "%s", usage_string);
+		switch_safe_free(mycmd);
+		return SWITCH_STATUS_SUCCESS;
+	}
+
+	if (find_api_command(argv[0], &command) != SWITCH_STATUS_SUCCESS) {
+		stream->write_function(stream, "%s", usage_string);
+		switch_safe_free(mycmd);
+		return SWITCH_STATUS_SUCCESS;
+	}
+
+	switch(command) {
+	case API_CMD_LISTENERS:
+		api_erlang_listeners(stream);
+		break;
+	case API_CMD_SESSIONS:
+		api_erlang_sessions(stream);
+		break;
+	case API_CMD_BINDINGS:
+		api_erlang_event(stream);
+		break;
+	default:
+		stream->write_function(stream, "%s", usage_string);
+	}
+
+	switch_safe_free(mycmd);
+	return SWITCH_STATUS_SUCCESS;
+}
+
 SWITCH_MODULE_LOAD_FUNCTION(mod_kazoo_load) {
-	// FIX ME:        switch_api_interface_t *api_interface;
+	switch_api_interface_t *api_interface;
+
 	memset(&globals, 0, sizeof(globals));
 	memset(&acceptor, 0, sizeof(acceptor));
 
@@ -655,9 +775,10 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_kazoo_load) {
 	*module_interface = switch_loadable_module_create_module_interface(pool, modname);
 
 	/* create an api for cli debug commands */
-	// FIX ME:        SWITCH_ADD_API(api_interface, "kazoo", "kazoo information", api_exec, "<command> [<args>]");
-	// FIX ME:        SWITCH_ADD_API(api_interface, "kazoo_bind_logs", "kazoo information", api_exec, "<command> [<args>]");
-	// FIX ME:        switch_console_set_complete("add kazoo listeners");
+	SWITCH_ADD_API(api_interface, "erlang", "kazoo information", exec_api_cmd, "<command> [<args>]");
+	switch_console_set_complete("add erlang listeners");
+	switch_console_set_complete("add erlang sessions");
+	switch_console_set_complete("add erlang bindings");
 
 	config();
 
