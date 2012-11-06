@@ -53,7 +53,7 @@ switch_status_t add_binding(switch_memory_pool_t *pool, switch_hash_t *bindings,
     erlang_pid *pid;
     char sub_key[MAX_PID_CHARS];
 
-    switch_snprintf(sub_key, sizeof(key), "<%d.%d.%d>", from->creation, from->num, from->serial);
+    switch_snprintf(sub_key, sizeof(sub_key), "<%d.%d.%d>", from->creation, from->num, from->serial);
     pid = malloc(sizeof(erlang_pid));
     memcpy(pid, from, sizeof(erlang_pid));
 
@@ -89,7 +89,12 @@ switch_status_t remove_pid_from_binding(switch_hash_t *bindings, switch_thread_r
         if ((pid = (erlang_pid *)switch_core_hash_find(hash, sub_key))) {
             switch_core_hash_delete(hash, sub_key);
             switch_safe_free(pid);
-        }
+
+	        if (!switch_hash_first(NULL, hash)) {
+			    switch_core_hash_destroy(&hash);
+			    switch_core_hash_delete(bindings, key);
+			}
+		}
     }
 
 	switch_thread_rwlock_unlock(rwlock);
@@ -100,6 +105,7 @@ switch_status_t remove_pid_from_binding(switch_hash_t *bindings, switch_thread_r
 switch_status_t remove_pid_from_bindings(switch_hash_t *bindings, switch_thread_rwlock_t *rwlock, erlang_pid *from) {
     switch_hash_index_t *index;
     switch_hash_t *hash;
+	switch_event_t *event = NULL;
     char sub_key[MAX_PID_CHARS];
 
     switch_snprintf(sub_key, sizeof(sub_key), "<%d.%d.%d>", from->creation, from->num, from->serial);
@@ -114,12 +120,30 @@ switch_status_t remove_pid_from_bindings(switch_hash_t *bindings, switch_thread_
 
         switch_hash_this(index, &key, NULL, &value);
         hash = (switch_hash_t*) value;
-
+	
         if ((pid = (erlang_pid *) switch_core_hash_find(hash, sub_key))) {
             switch_core_hash_delete(hash, sub_key);
             switch_safe_free(pid);
-        }
+
+			/* if there is nothing left in the sub_hash, destroy it and schedule the key for removal */
+	        if (!switch_hash_first(NULL, hash)) {
+				if(!event) {
+					switch_event_create_subclass(&event, SWITCH_EVENT_CLONE, NULL);
+					switch_assert(event);
+				}				
+				switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "delete", (const char *) key);
+			    switch_core_hash_destroy(&hash);
+			}
+		}
     }
+
+	if(event) {
+		switch_event_header_t *header = NULL;
+		for (header = event->headers; header; header = header->next) {
+			switch_core_hash_delete(bindings, header->value);
+		}
+		switch_event_destroy(&event);
+	}
 
 	switch_thread_rwlock_unlock(rwlock);
 
