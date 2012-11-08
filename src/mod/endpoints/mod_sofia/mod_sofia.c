@@ -3222,6 +3222,26 @@ static void xml_gateway_status(sofia_gateway_t *gp, switch_stream_handle_t *stre
 	stream->write_function(stream, "    <failed-calls-in>%u</failed-calls-in>\n", gp->ib_failed_calls);
 	stream->write_function(stream, "    <failed-calls-out>%u</failed-calls-out>\n", gp->ob_failed_calls);
 
+	if (gp->ib_vars) {
+	  switch_event_header_t *hp;
+
+      stream->write_function(stream, "      <inbound-variables>\n");
+	  for (hp = gp->ib_vars->headers; hp; hp = hp->next) {
+		stream->write_function(stream, "        <variable name=\"%s\" value=\"%s\" />\n", hp->name, hp->value);
+	  }
+      stream->write_function(stream, "      </inbound-variables>\n");
+	}
+
+	if (gp->ob_vars) {
+	  switch_event_header_t *hp;
+
+      stream->write_function(stream, "      <outbound-variables>\n");
+	  for (hp = gp->ob_vars->headers; hp; hp = hp->next) {
+		stream->write_function(stream, "        <variable name=\"%s\" value=\"%s\" />\n", hp->name, hp->value);
+	  }
+      stream->write_function(stream, "      </outbound-variables>\n");
+	}
+
 	if (gp->state == REG_STATE_FAILED || gp->state == REG_STATE_TRYING) {
 		time_t now = switch_epoch_time_now(NULL);
 		if (gp->retry > now) {

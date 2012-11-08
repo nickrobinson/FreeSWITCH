@@ -394,6 +394,49 @@ static switch_status_t handle_request_event(listener_t *listener, erlang_msg * m
 	return erlang_response_ok(rbuf);
 }
 
+static char *expand_vars(char *xml_str) {
+	char *var, *val;
+	char *rp = xml_str; /* read pointer */
+	char *ep, *wp, *buff; /* end pointer, write pointer, write buffer */
+	
+	if (!(strstr(xml_str, "$${"))) {
+		return xml_str;
+	}
+
+	switch_zmalloc(buff, strlen(xml_str) * 2);
+	wp = buff;
+	ep = buff + (strlen(xml_str) * 2) - 1;
+
+	while (*rp && wp < ep) {
+		if (*rp == '$' && *(rp + 1) == '$' && *(rp + 2) == '{') {
+			char *e = switch_find_end_paren(rp + 2, '{', '}');
+
+			if (e) {
+				rp += 3;
+				var = rp;
+				*e++ = '\0';
+				rp = e;
+
+				if ((val = switch_core_get_variable_dup(var))) {
+					char *p;
+					for (p = val; p && *p && wp <= ep; p++) {
+						*wp++ = *p;
+					}
+					switch_safe_free(val);
+				}
+				continue;
+			}
+		}
+
+		*wp++ = *rp++;
+	}
+
+	*wp++ = '\0';
+
+	switch_safe_free(xml_str);
+	return buff;
+}
+
 static switch_status_t handle_request_fetch_reply(listener_t *listener, erlang_msg * msg, int arity, ei_x_buff * buf, ei_x_buff * rbuf) {
 	xml_fetch_msg_t *fetch_msg = NULL;
 	switch_xml_t xml = NULL;
@@ -422,6 +465,8 @@ static switch_status_t handle_request_fetch_reply(listener_t *listener, erlang_m
 	}
 
 	/* If we succeed in parsing the xml_str, it will be free'd by the core */
+	xml_str = expand_vars(xml_str);
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Parsed XML: %s\n", xml_str);
 	if ((xml = switch_xml_parse_str_dynamic(xml_str, SWITCH_FALSE))) {
 		fetch_msg->xml = xml;
 	} else {
