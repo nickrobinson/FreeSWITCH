@@ -54,9 +54,7 @@ SWITCH_DECLARE_GLOBAL_STRING_FUNC(set_pref_ei_nodename, prefs.ei_nodename);
 
 /* Function Definitions */
 static void *SWITCH_THREAD_FUNC erl_to_fs_loop(switch_thread_t *thread, void *obj);
-static void *SWITCH_THREAD_FUNC fs_to_erl_loop(switch_thread_t *thread, void *obj);
 static void launch_erl_to_fs_thread(listener_t *listener);
-static void launch_fs_to_erl_thread(listener_t *listener);
 static void stop_listener(listener_t *listener);
 
 static char *API_COMMANDS[] = {
@@ -306,72 +304,18 @@ static switch_xml_t fetch_handler(const char *section, const char *tag_name, con
 	return xml;
 }
 
-static void *SWITCH_THREAD_FUNC fs_to_erl_loop(switch_thread_t *thread, void *obj) {
-	void *pop;
-	int sent = 0;
-	listener_t *listener = (listener_t *) obj;
-	switch_atomic_inc(&prefs.threads);
-
-	switch_assert(listener != NULL);
-
-	/* grab a read lock on the listener so nobody can remove it until we exit... */
-	switch_thread_rwlock_rdlock(listener->rwlock);
-
-	/* This thread is responsible for adding/removing from the listener_list */
-	/* as erl_to_fs_loop does not need to be in the list (since its used to */
-	/* duplicate events destined for erlang) */
-	add_listener(listener);
-
-	while (switch_test_flag(listener, LFLAG_RUNNING) && switch_test_flag(&globals, LFLAG_RUNNING)) {
-		sent = 0;
-
-		if (switch_queue_trypop(listener->fetch_queue, &pop) == SWITCH_STATUS_SUCCESS) {
-			char *uuid_str = (char *) pop;
-			send_fetch_to_bindings(listener, uuid_str);
-			switch_safe_free(uuid_str);
-			pop = NULL;
-			sent = 1;
-		}
-
-		if (switch_queue_trypop(listener->event_queue, &pop) == SWITCH_STATUS_SUCCESS) {
-			switch_event_t *event = (switch_event_t *) pop;
-			/* if there was an event waiting in our queue send it to */
-			/* any erlang processes bound its type */
-			send_event_to_bindings(listener, event);
-			switch_event_destroy(&event);
-			pop = NULL;
-			sent = 1;
-		}
-
-		if (!sent) {
-			switch_yield(1000);
-		}
-	}
-
-	/* flag this listener as stopped */
-	stop_listener(listener);
-
-	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Shutting down freeswitch event sender for %p: %s (%s)\n", (void *)listener, listener->peer_nodename, listener->remote_ip);
-
-	/* remove the read lock that we have been holding on to while running */
-	switch_thread_rwlock_unlock(listener->rwlock);
-
-	/* This thread is responsible for cleaning up the listener */
-	destroy_listener(listener);
-
-	switch_atomic_dec(&prefs.threads);
-	return NULL;
-}
-
 static void *SWITCH_THREAD_FUNC erl_to_fs_loop(switch_thread_t *thread, void *obj) {
 	listener_t *listener = (listener_t *) obj;
 	int status = 1;
+	void *pop;
 	switch_atomic_inc(&prefs.threads);
 
 	switch_assert(listener != NULL);
 
 	/* grab a read lock on the listener so nobody can remove it until we exit... */
 	switch_thread_rwlock_rdlock(listener->rwlock);
+
+	add_listener(listener);
 
 	while (switch_test_flag(listener, LFLAG_RUNNING) && switch_test_flag(&globals, LFLAG_RUNNING) && status >= 0) {
 		erlang_msg msg;
@@ -383,7 +327,7 @@ static void *SWITCH_THREAD_FUNC erl_to_fs_loop(switch_thread_t *thread, void *ob
 		ei_x_new_with_version(&rbuf);
 
 		/* wait for a erlang message, or timeout after 100ms to check if the module is still running */
-		status = ei_xreceive_msg_tmo(listener->clientfd, &msg, &buf, 100);
+		status = ei_xreceive_msg_tmo(listener->clientfd, &msg, &buf, 5);
 
 		switch (status) {
 			case ERL_TICK:
@@ -443,17 +387,35 @@ static void *SWITCH_THREAD_FUNC erl_to_fs_loop(switch_thread_t *thread, void *ob
 				break;
 		}
 
+		if (switch_queue_trypop(listener->fetch_queue, &pop) == SWITCH_STATUS_SUCCESS) {
+			char *uuid_str = (char *) pop;
+			send_fetch_to_bindings(listener, uuid_str);
+			switch_safe_free(uuid_str);
+			pop = NULL;
+		}
+
+		if (switch_queue_trypop(listener->event_queue, &pop) == SWITCH_STATUS_SUCCESS) {
+			switch_event_t *event = (switch_event_t *) pop;
+			/* if there was an event waiting in our queue send it to */
+			/* any erlang processes bound its type */
+			send_event_to_bindings(listener, event);
+			switch_event_destroy(&event);
+			pop = NULL;
+		}
+
 		ei_x_free(&buf);
 		ei_x_free(&rbuf);
 	}
 
 	/* flag this listener as stopped */
-	switch_clear_flag(listener, LFLAG_RUNNING);
+	stop_listener(listener);
 
 	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Shutting down erlang event receiver %p: %s (%s)\n", (void *)listener, listener->peer_nodename, listener->remote_ip);
 
 	/* remove the read lock that we have been holding on to while running */
 	switch_thread_rwlock_unlock(listener->rwlock);
+
+	destroy_listener(listener);
 
 	switch_atomic_dec(&prefs.threads);
 	return NULL;
@@ -468,17 +430,6 @@ static void launch_erl_to_fs_thread(listener_t *listener) {
 	switch_threadattr_detach_set(thd_attr, 1);
 	switch_threadattr_stacksize_set(thd_attr, SWITCH_THREAD_STACKSIZE);
 	switch_thread_create(&thread, thd_attr, erl_to_fs_loop, listener, listener->pool);
-}
-
-/* Create a thread to send freeswitch events, logs, and fetch requests to an erlang node */
-static void launch_fs_to_erl_thread(listener_t *listener) {
-	switch_thread_t *thread;
-	switch_threadattr_t *thd_attr = NULL;
-
-	switch_threadattr_create(&thd_attr, listener->pool);
-	switch_threadattr_detach_set(thd_attr, 1);
-	switch_threadattr_stacksize_set(thd_attr, SWITCH_THREAD_STACKSIZE);
-	switch_thread_create(&thread, thd_attr, fs_to_erl_loop, listener, listener->pool);
 }
 
 static int read_cookie_from_file(char *filename) {
@@ -995,9 +946,8 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime) {
 
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "New erlang connection from node %s (%s)\n", listener->peer_nodename, listener->remote_ip);
 
-		/* Go do some real work - start the threads for this erlang node! */
+		/* Go do some real work - start the thread for this erlang node! */
 		launch_erl_to_fs_thread(listener);
-		launch_fs_to_erl_thread(listener);
 
         listener = NULL;
 	}
