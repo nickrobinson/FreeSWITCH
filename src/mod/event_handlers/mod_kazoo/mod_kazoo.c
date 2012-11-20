@@ -266,6 +266,9 @@ static switch_xml_t fetch_handler(const char *section, const char *tag_name, con
 
 				switch_core_hash_insert_wrlock(globals.fetch_resp_hash, fetch_msg->uuid_str, fetch_msg, globals.fetch_resp_lock);
 
+				/* These is an extremely unlikely race condition here.  If the network request and corresponding erlang response arrives */
+				/* before we get to switch_thread_cond_timedwait bellow, the response will be thrown away.... but there is no way communication */
+				/* between two servers is faster than C code on one.... right?  Ya, I am sure thats right. */
 				switch_mutex_lock(fetch_msg->mutex);
 			}
 
