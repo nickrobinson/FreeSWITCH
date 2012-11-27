@@ -240,7 +240,7 @@ static switch_xml_t fetch_handler(const char *section, const char *tag_name, con
 	}
 
 	now = switch_micro_time_now();
-		
+
     /* switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "Got fetch request: %s / %s / %s = %s\n", section, tag_name, key_name, key_value); */
 
 	switch_thread_rwlock_rdlock(acceptor.listeners_lock);
@@ -274,7 +274,7 @@ static switch_xml_t fetch_handler(const char *section, const char *tag_name, con
 			if (switch_queue_trypush(listener->fetch_queue, dup_uuid) == SWITCH_STATUS_SUCCESS) {
 				found_bindings = 1;
 			} else {
-				switch_safe_free(dup_uuid);				
+				switch_safe_free(dup_uuid);
 			}
 		}
 	}
@@ -327,7 +327,7 @@ static void *SWITCH_THREAD_FUNC erl_to_fs_loop(switch_thread_t *thread, void *ob
 		ei_x_new_with_version(&rbuf);
 
 		/* wait for a erlang message, or timeout after 100ms to check if the module is still running */
-		status = ei_xreceive_msg_tmo(listener->clientfd, &msg, &buf, 5);
+		status = ei_xreceive_msg_tmo(listener->clientfd, &msg, &buf, 100);
 
 		switch (status) {
 			case ERL_TICK:
@@ -842,7 +842,7 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime) {
 				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Compatability with OTP R%d requested\n", prefs.ei_compat_rel);
 				ei_set_compat_rel(prefs.ei_compat_rel);
 			}
-			
+
 			/* try to initialize the erlang interface */
 			if (SWITCH_STATUS_SUCCESS != initialize_ei(&ec, sa, &prefs)) {
 				continue;
@@ -855,9 +855,9 @@ SWITCH_MODULE_RUNTIME_FUNCTION(mod_kazoo_runtime) {
 				continue;
 			} else {
 				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Connected to epmd and published erlang cnode name %s at port %d\n", ec.thisnodename, prefs.port);
-				
+
 				/* we are listening on a socket, configured the erlang interface, and published our node name to ip:port mapping... we are ready! */
-				acceptor.ready = 1;        
+				acceptor.ready = 1;
 
 				break;
 			}
