@@ -104,7 +104,7 @@ void globfree(glob_t *);
 /* Use UTF-8 as the general encoding */
 static switch_bool_t USE_UTF_8_ENCODING = SWITCH_TRUE;
 
-static int preprocess(const char *cwd, const char *file, int write_fd, int rlevel);
+static int preprocess(const char *cwd, const char *file, FILE *write_fd, int rlevel);
 
 typedef struct switch_xml_root *switch_xml_root_t;
 struct switch_xml_root {		/* additional data for the root tag */
@@ -222,12 +222,15 @@ SWITCH_DECLARE(switch_status_t) switch_xml_unbind_search_function_ptr(switch_xml
 	switch_thread_rwlock_wrlock(B_RWLOCK);
 	for (ptr = BINDINGS; ptr; ptr = ptr->next) {
 		if (ptr->function == function) {
+			status = SWITCH_STATUS_SUCCESS;
+
 			if (last) {
 				last->next = ptr->next;
 			} else {
 				BINDINGS = ptr->next;
+				last = NULL;
+				continue;
 			}
-			status = SWITCH_STATUS_SUCCESS;
 		}
 		last = ptr;
 	}
@@ -972,7 +975,7 @@ SWITCH_DECLARE(switch_xml_t) switch_xml_parse_str_dynamic(char *s, switch_bool_t
 	}
 }
 
-/* parse the given xml string and return an switch_xml structure */
+/* parse the given xml string and return a switch_xml structure */
 SWITCH_DECLARE(switch_xml_t) switch_xml_parse_str(char *s, switch_size_t len)
 {
 	switch_xml_root_t root = (switch_xml_root_t) switch_xml_new(NULL);
@@ -1224,12 +1227,12 @@ static char *expand_vars(char *buf, char *ebuf, switch_size_t elen, switch_size_
 	return ebuf;
 }
 
-static int preprocess_exec(const char *cwd, const char *command, int write_fd, int rlevel)
+static FILE *preprocess_exec(const char *cwd, const char *command, FILE *write_fd, int rlevel)
 {
 #ifdef WIN32
 	char message[] = "<!-- exec not implemented in windows yet -->";
 
-	if (write(write_fd, message, sizeof(message)) < 0) {
+	if (fwrite( message, 1, sizeof(message), write_fd) < 0) {
 		goto end;
 	}
 #else
@@ -1238,7 +1241,7 @@ static int preprocess_exec(const char *cwd, const char *command, int write_fd, i
 	if (pipe(fds)) {
 		goto end;
 	} else {					/* good to go */
-		pid = fork();
+		pid = switch_fork();
 
 		if (pid < 0) {			/* ok maybe not */
 			close(fds[0]);
@@ -1249,7 +1252,7 @@ static int preprocess_exec(const char *cwd, const char *command, int write_fd, i
 			int bytes;
 			close(fds[1]);
 			while ((bytes = read(fds[0], buf, sizeof(buf))) > 0) {
-				if (write(write_fd, buf, bytes) <= 0) {
+				if (fwrite(buf, 1, bytes, write_fd) <= 0) {
 					break;
 				}
 			}
@@ -1271,7 +1274,7 @@ static int preprocess_exec(const char *cwd, const char *command, int write_fd, i
 
 }
 
-static int preprocess_glob(const char *cwd, const char *pattern, int write_fd, int rlevel)
+static FILE *preprocess_glob(const char *cwd, const char *pattern, FILE *write_fd, int rlevel)
 {
 	char *full_path = NULL;
 	char *dir_path = NULL, *e = NULL;
@@ -1310,28 +1313,43 @@ static int preprocess_glob(const char *cwd, const char *pattern, int write_fd, i
 	return write_fd;
 }
 
-static int preprocess(const char *cwd, const char *file, int write_fd, int rlevel)
+static int preprocess(const char *cwd, const char *file, FILE *write_fd, int rlevel)
 {
-	int read_fd = -1;
+	FILE *read_fd = NULL;
 	switch_size_t cur = 0, ml = 0;
-	char *q, *cmd, buf[2048], ebuf[8192];
+	char *q, *cmd, *buf = NULL, *ebuf = NULL;
 	char *tcmd, *targ;
 	int line = 0;
-
-	if ((read_fd = open(file, O_RDONLY, 0)) < 0) {
-		const char *reason = strerror(errno);
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Couldnt open %s (%s)\n", file, reason);
-		return read_fd;
-	}
+	switch_size_t len = 0, eblen = 0;
 
 	if (rlevel > 100) {
 		return -1;
 	}
 
-	while ((cur = switch_fd_read_line(read_fd, buf, sizeof(buf))) > 0) {
+	if (!(read_fd = fopen(file, "r"))) {
+		const char *reason = strerror(errno);
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Couldnt open %s (%s)\n", file, reason);
+		return -1;
+	}
+
+	setvbuf(read_fd, (char *) NULL, _IOFBF, 65536);
+	
+	for(;;) {
 		char *arg, *e;
 		const char *err = NULL;
-		char *bp = expand_vars(buf, ebuf, sizeof(ebuf), &cur, &err);
+		char *bp;
+
+		switch_safe_free(ebuf);
+
+		if ((cur = switch_fp_read_dline(read_fd, &buf, &len)) <= 0) {
+			break;
+		}
+
+		eblen = len *2;
+		ebuf = malloc(eblen);
+		memset(ebuf, 0, eblen);
+		
+		bp = expand_vars(buf, ebuf, eblen, &cur, &err);
 		line++;
 
 		if (err) {
@@ -1360,7 +1378,7 @@ static int preprocess(const char *cwd, const char *file, int write_fd, int rleve
 			if ((e = strstr(tcmd, "/>"))) {
 				*e += 2;
 				*e = '\0';
-				if (write(write_fd, e, (unsigned) strlen(e)) != (int) strlen(e)) {
+				if (fwrite(e, 1, (unsigned) strlen(e), write_fd) != (int) strlen(e)) {
 					switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Short write!\n");
 				}
 			}
@@ -1431,13 +1449,13 @@ static int preprocess(const char *cwd, const char *file, int write_fd, int rleve
 		}
 
 		if ((cmd = strstr(bp, "<!--#"))) {
-			if (write(write_fd, bp, (unsigned) (cmd - bp)) != (cmd - bp)) {
+			if (fwrite(bp, 1, (unsigned) (cmd - bp), write_fd) != (unsigned) (cmd - bp)) {
 				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Short write!\n");
 			}
 			if ((e = strstr(cmd, "-->"))) {
 				*e = '\0';
 				e += 3;
-				if (write(write_fd, e, (unsigned) strlen(e)) != (int) strlen(e)) {
+				if (fwrite(e, 1, (unsigned) strlen(e), write_fd) != (int) strlen(e)) {
 					switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Short write!\n");
 				}
 			} else {
@@ -1489,13 +1507,18 @@ static int preprocess(const char *cwd, const char *file, int write_fd, int rleve
 			continue;
 		}
 
-		if (write(write_fd, bp, (unsigned) cur) != (int) cur) {
+		if (fwrite(bp, 1, (unsigned) cur, write_fd) != (int) cur) {
 			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Short write!\n");
 		}
+
 	}
 
-	close(read_fd);
-	return write_fd;
+	switch_safe_free(buf);
+	switch_safe_free(ebuf);
+
+	fclose(read_fd);
+
+	return 0;
 }
 
 SWITCH_DECLARE(switch_xml_t) switch_xml_parse_file_simple(const char *file)
@@ -1527,7 +1550,8 @@ SWITCH_DECLARE(switch_xml_t) switch_xml_parse_file_simple(const char *file)
 
 SWITCH_DECLARE(switch_xml_t) switch_xml_parse_file(const char *file)
 {
-	int fd = -1, write_fd = -1;
+	int fd = -1;
+	FILE *write_fd = NULL;
 	switch_xml_t xml = NULL;
 	char *new_file = NULL;
 	const char *abs, *absw;
@@ -1546,13 +1570,15 @@ SWITCH_DECLARE(switch_xml_t) switch_xml_parse_file(const char *file)
 		goto done;
 	}
 
-	if ((write_fd = open(new_file, O_WRONLY | O_CREAT | O_TRUNC, S_IRUSR | S_IWUSR)) < 0) {
+	if ((write_fd = fopen(new_file, "w+")) == NULL) {
 		goto done;
 	}
 
+	setvbuf(write_fd, (char *) NULL, _IOFBF, 65536);
+
 	if (preprocess(SWITCH_GLOBAL_dirs.conf_dir, file, write_fd, 0) > -1) {
-		close(write_fd);
-		write_fd = -1;
+		fclose(write_fd);
+		write_fd = NULL;
 		if ((fd = open(new_file, O_RDONLY, 0)) > -1) {
 			if ((xml = switch_xml_parse_fd(fd))) {
 				xml->free_path = new_file;
@@ -1567,8 +1593,9 @@ SWITCH_DECLARE(switch_xml_t) switch_xml_parse_file(const char *file)
 
 	switch_mutex_unlock(FILE_LOCK);
 
-	if (write_fd > -1) {
-		close(write_fd);
+	if (write_fd) {
+		fclose(write_fd);
+		write_fd = NULL;
 	}
 
 	if (fd > -1) {
@@ -2472,7 +2499,24 @@ SWITCH_DECLARE(char *) switch_xml_toxml(switch_xml_t xml, switch_bool_t prn_head
 	return r;
 }
 
-/* converts an switch_xml structure back to xml, returning a string of xml date that
+SWITCH_DECLARE(char *) switch_xml_tohtml(switch_xml_t xml, switch_bool_t prn_header)
+{
+	char *r, *s, *h;
+	switch_size_t rlen = 0;
+	switch_size_t len = SWITCH_XML_BUFSIZE;
+	switch_mutex_lock(XML_GEN_LOCK);
+	s = (char *) malloc(SWITCH_XML_BUFSIZE);
+	switch_assert(s);
+	h = (char *) malloc(SWITCH_XML_BUFSIZE);
+	switch_assert(h);
+	r = switch_xml_toxml_buf(xml, s, SWITCH_XML_BUFSIZE, 0, prn_header);
+	h = switch_xml_ampencode(r, 0, &h, &rlen, &len, 1);
+	switch_safe_free(r);
+	switch_mutex_unlock(XML_GEN_LOCK);
+	return h;
+}
+
+/* converts a switch_xml structure back to xml, returning a string of xml data that
    must be freed */
 SWITCH_DECLARE(char *) switch_xml_toxml_buf(switch_xml_t xml, char *buf, switch_size_t buflen, switch_size_t offset, switch_bool_t prn_header)
 {
@@ -2660,7 +2704,7 @@ SWITCH_DECLARE(switch_xml_t) switch_xml_new(const char *name)
 	return &root->xml;
 }
 
-/* inserts an existing tag into an switch_xml structure */
+/* inserts an existing tag into a switch_xml structure */
 SWITCH_DECLARE(switch_xml_t) switch_xml_insert(switch_xml_t xml, switch_xml_t dest, switch_size_t off)
 {
 	switch_xml_t cur, prev, head;
@@ -2839,7 +2883,7 @@ SWITCH_DECLARE(switch_xml_t) switch_xml_cut(switch_xml_t xml)
 	return xml;
 }
 
-SWITCH_DECLARE(int) switch_xml_std_datetime_check(switch_xml_t xcond, int *offset) 
+SWITCH_DECLARE(int) switch_xml_std_datetime_check(switch_xml_t xcond, int *offset, const char *tzname) 
 {
 
 	const char *xdt = switch_xml_attr(xcond, "date-time");
@@ -2855,22 +2899,56 @@ SWITCH_DECLARE(int) switch_xml_std_datetime_check(switch_xml_t xcond, int *offse
 	const char *xminday = switch_xml_attr(xcond, "minute-of-day");
 	const char *xtod = switch_xml_attr(xcond, "time-of-day");
 	const char *tzoff = switch_xml_attr(xcond, "tz-offset");
-	int loffset = 0;
+	const char *isdst = switch_xml_attr(xcond, "dst");
 
+	int loffset = -1000;
+	int eoffset = -1000;
+	int dst = -1000;
 	switch_time_t ts = switch_micro_time_now();
 	int time_match = -1;
-	switch_time_exp_t tm;
+	switch_time_exp_t tm, tm2;
+
+	if (!zstr(isdst)) {
+		dst = switch_true(isdst);
+	}
 
 	if (!zstr(tzoff) && switch_is_number(tzoff)) {
 		loffset = atoi(tzoff);
-		offset = &loffset;
+	}
+
+	switch_time_exp_lt(&tm2, ts);
+
+	if (offset) {
+		eoffset = *offset;
+		switch_time_exp_tz(&tm, ts, *offset * 3600);
+	} else if (!zstr(tzname)) {
+		switch_time_exp_tz_name(tzname, &tm, ts);
+	} else {
+		tm = tm2;
+	}
+
+	if (eoffset == -1000) {
+		eoffset = tm.tm_gmtoff / 3600;
+	}
+
+	if (loffset == -1000) {
+		loffset = eoffset;
 	}
 
 
-	if (offset) {
-		switch_time_exp_tz(&tm, ts, *offset);
-	} else {
-		switch_time_exp_lt(&tm, ts);
+	if (time_match && tzoff) {
+		time_match = loffset == eoffset;
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG9,
+						  "XML DateTime Check: TZOFFSET[%d] == %d (%s)\n", eoffset, loffset, time_match ? "PASS" : "FAIL");
+
+	}
+
+	if (time_match && dst > -1) {
+		time_match = (tm2.tm_isdst > 0 && dst > 0);
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG9,
+						  "XML DateTime Check: DST[%s] == %s (%s)\n", 
+						  tm2.tm_isdst > 0 ? "true" : "false", dst > 0 ? "true" : "false", time_match ? "PASS" : "FAIL");
+
 	}
 
 	if (time_match && xdt) {
@@ -3076,7 +3154,7 @@ done:
 #define	RANGE		'-'
 #define	RBRACKET	']'
 #define	SEP		'/'
-#define WIN_SEP '\\'
+#define WIN_SEP '/'
 #define	STAR		'*'
 #define	TILDE		'~'
 #define	UNDERSCORE	'_'

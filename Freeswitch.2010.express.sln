@@ -142,13 +142,13 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mod_spidermonkey_curl", "sr
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mod_lua", "src\mod\languages\mod_lua\mod_lua.2010.vcxproj", "{7B077E7F-1BE7-4291-AB86-55E527B25CAC}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "abyss", "libs\xmlrpc-c\Windows\abyss.2010.vcxproj", "{D2396DD7-7D38-473A-ABB7-6F96D65AE1B9}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "abyss", "libs\win32\xmlrpc-c\abyss.2010.vcxproj", "{D2396DD7-7D38-473A-ABB7-6F96D65AE1B9}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "xmlrpc", "libs\xmlrpc-c\Windows\xmlrpc.2010.vcxproj", "{CEE544A9-0303-44C2-8ECE-EFA7D7BCBBBA}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "xmlrpc", "libs\win32\xmlrpc-c\xmlrpc.2010.vcxproj", "{CEE544A9-0303-44C2-8ECE-EFA7D7BCBBBA}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "xmlparse", "libs\xmlrpc-c\Windows\xmlparse.2010.vcxproj", "{0D108721-EAE8-4BAF-8102-D8960EC93647}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "xmlparse", "libs\win32\xmlrpc-c\xmlparse.2010.vcxproj", "{0D108721-EAE8-4BAF-8102-D8960EC93647}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "xmltok", "libs\xmlrpc-c\Windows\xmltok.2010.vcxproj", "{B535402E-38D2-4D54-8360-423ACBD17192}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "xmltok", "libs\win32\xmlrpc-c\xmltok.2010.vcxproj", "{B535402E-38D2-4D54-8360-423ACBD17192}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Download sphinxbase", "libs\win32\Download sphinxbase.2010.vcxproj", "{4F92B672-DADB-4047-8D6A-4BB3796733FD}"
 EndProject
@@ -219,6 +219,9 @@ EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mod_lcr", "src\mod\applications\mod_lcr\mod_lcr.2010.vcxproj", "{1A3793D1-05D1-4B57-9B0F-5AF3E79DC439}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "libspandsp", "libs\spandsp\src\libspandsp.2010.vcxproj", "{1CBB0077-18C5-455F-801C-0A0CE7B0BBF5}"
+	ProjectSection(ProjectDependencies) = postProject
+		{019DBD2A-273D-4BA4-BF86-B5EFE2ED76B1} = {019DBD2A-273D-4BA4-BF86-B5EFE2ED76B1}
+	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "libspeex", "libs\speex\win32\VS2008\libspeex\libspeex.vcxproj", "{E972C52F-9E85-4D65-B19C-031E511E9DB4}"
 EndProject
@@ -237,6 +240,8 @@ EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "make_modem_filter", "libs\spandsp\src\msvc\make_modem_filter.2010.vcxproj", "{329A6FA0-0FCC-4435-A950-E670AEFA9838}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mod_skel", "src\mod\applications\mod_skel\mod_skel.2010.vcxproj", "{11C9BC3D-45E9-46E3-BE84-B8CEE4685E39}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mod_spy", "src\mod\applications\mod_spy\mod_spy.2010.vcxproj", "{A61D7CB4-75A5-4A55-8CA1-BE5AF615D921}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "mod_skypopen", "src\mod\endpoints\mod_skypopen\mod_skypopen.2010.vcxproj", "{C6E78A4C-DB1E-47F4-9B63-4DC27D86343F}"
 EndProject
@@ -321,6 +326,15 @@ EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "libpcre Generate pcre_chartables.c", "libs\win32\pcre\pcre_chartables.c.2010.vcxproj", "{1CED5987-A529-46DC-B30F-870D85FF9C94}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "libzrtp", "libs\libzrtp\projects\win\libzrtp.2010.vcxproj", "{C13CC324-0032-4492-9A30-310A6BD64FF5}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Download libjpeg", "libs\win32\Download libjpeg.2010.vcxproj", "{652AD5F7-8488-489F-AAD0-7FBE064703B6}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "libjpeg", "libs\win32\libjpeg\libjpeg.2010.vcxproj", "{019DBD2A-273D-4BA4-BF86-B5EFE2ED76B1}"
+	ProjectSection(ProjectDependencies) = postProject
+		{652AD5F7-8488-489F-AAD0-7FBE064703B6} = {652AD5F7-8488-489F-AAD0-7FBE064703B6}
+	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "gennmtab", "libs\win32\xmlrpc-c\gennmtab.2010.vcxproj", "{BED7539C-0099-4A14-AD5D-30828F15A171}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -1584,6 +1598,17 @@ Global
 		{11C9BC3D-45E9-46E3-BE84-B8CEE4685E39}.Debug|x64.ActiveCfg = Debug|x64
 		{11C9BC3D-45E9-46E3-BE84-B8CEE4685E39}.Release|Win32.ActiveCfg = Release|Win32
 		{11C9BC3D-45E9-46E3-BE84-B8CEE4685E39}.Release|x64.ActiveCfg = Release|x64
+		{A61D7CB4-75A5-4A55-8CA1-BE5AF615D921}.All|Win32.ActiveCfg = Release|x64
+		{A61D7CB4-75A5-4A55-8CA1-BE5AF615D921}.All|x64.ActiveCfg = Release|x64
+		{A61D7CB4-75A5-4A55-8CA1-BE5AF615D921}.All|x64.Build.0 = Release|x64
+		{A61D7CB4-75A5-4A55-8CA1-BE5AF615D921}.Debug|Win32.ActiveCfg = Debug|Win32
+		{A61D7CB4-75A5-4A55-8CA1-BE5AF615D921}.Debug|Win32.Build.0 = Debug|Win32
+		{A61D7CB4-75A5-4A55-8CA1-BE5AF615D921}.Debug|x64.ActiveCfg = Debug|x64
+		{A61D7CB4-75A5-4A55-8CA1-BE5AF615D921}.Debug|x64.Build.0 = Debug|x64
+		{A61D7CB4-75A5-4A55-8CA1-BE5AF615D921}.Release|Win32.ActiveCfg = Release|Win32
+		{A61D7CB4-75A5-4A55-8CA1-BE5AF615D921}.Release|Win32.Build.0 = Release|Win32
+		{A61D7CB4-75A5-4A55-8CA1-BE5AF615D921}.Release|x64.ActiveCfg = Release|x64
+		{A61D7CB4-75A5-4A55-8CA1-BE5AF615D921}.Release|x64.Build.0 = Release|x64
 		{C6E78A4C-DB1E-47F4-9B63-4DC27D86343F}.All|Win32.ActiveCfg = Release|Win32
 		{C6E78A4C-DB1E-47F4-9B63-4DC27D86343F}.All|Win32.Build.0 = Release|Win32
 		{C6E78A4C-DB1E-47F4-9B63-4DC27D86343F}.All|x64.ActiveCfg = Release|Win32
@@ -2002,6 +2027,33 @@ Global
 		{C13CC324-0032-4492-9A30-310A6BD64FF5}.Release|Win32.Build.0 = Release|Win32
 		{C13CC324-0032-4492-9A30-310A6BD64FF5}.Release|x64.ActiveCfg = Release|x64
 		{C13CC324-0032-4492-9A30-310A6BD64FF5}.Release|x64.Build.0 = Release|x64
+		{652AD5F7-8488-489F-AAD0-7FBE064703B6}.All|Win32.ActiveCfg = Release|Win32
+		{652AD5F7-8488-489F-AAD0-7FBE064703B6}.All|Win32.Build.0 = Release|Win32
+		{652AD5F7-8488-489F-AAD0-7FBE064703B6}.All|x64.ActiveCfg = Release|Win32
+		{652AD5F7-8488-489F-AAD0-7FBE064703B6}.Debug|Win32.ActiveCfg = Debug|Win32
+		{652AD5F7-8488-489F-AAD0-7FBE064703B6}.Debug|Win32.Build.0 = Debug|Win32
+		{652AD5F7-8488-489F-AAD0-7FBE064703B6}.Debug|x64.ActiveCfg = Debug|Win32
+		{652AD5F7-8488-489F-AAD0-7FBE064703B6}.Release|Win32.ActiveCfg = Release|Win32
+		{652AD5F7-8488-489F-AAD0-7FBE064703B6}.Release|Win32.Build.0 = Release|Win32
+		{652AD5F7-8488-489F-AAD0-7FBE064703B6}.Release|x64.ActiveCfg = Release|Win32
+		{019DBD2A-273D-4BA4-BF86-B5EFE2ED76B1}.All|Win32.ActiveCfg = Release|Win32
+		{019DBD2A-273D-4BA4-BF86-B5EFE2ED76B1}.All|Win32.Build.0 = Release|Win32
+		{019DBD2A-273D-4BA4-BF86-B5EFE2ED76B1}.All|x64.ActiveCfg = Release|Win32
+		{019DBD2A-273D-4BA4-BF86-B5EFE2ED76B1}.Debug|Win32.ActiveCfg = Debug|Win32
+		{019DBD2A-273D-4BA4-BF86-B5EFE2ED76B1}.Debug|Win32.Build.0 = Debug|Win32
+		{019DBD2A-273D-4BA4-BF86-B5EFE2ED76B1}.Debug|x64.ActiveCfg = Debug|Win32
+		{019DBD2A-273D-4BA4-BF86-B5EFE2ED76B1}.Release|Win32.ActiveCfg = Release|Win32
+		{019DBD2A-273D-4BA4-BF86-B5EFE2ED76B1}.Release|Win32.Build.0 = Release|Win32
+		{019DBD2A-273D-4BA4-BF86-B5EFE2ED76B1}.Release|x64.ActiveCfg = Release|Win32
+		{BED7539C-0099-4A14-AD5D-30828F15A171}.All|Win32.ActiveCfg = Release|Win32
+		{BED7539C-0099-4A14-AD5D-30828F15A171}.All|Win32.Build.0 = Release|Win32
+		{BED7539C-0099-4A14-AD5D-30828F15A171}.All|x64.ActiveCfg = Release|Win32
+		{BED7539C-0099-4A14-AD5D-30828F15A171}.Debug|Win32.ActiveCfg = Debug|Win32
+		{BED7539C-0099-4A14-AD5D-30828F15A171}.Debug|Win32.Build.0 = Debug|Win32
+		{BED7539C-0099-4A14-AD5D-30828F15A171}.Debug|x64.ActiveCfg = Debug|Win32
+		{BED7539C-0099-4A14-AD5D-30828F15A171}.Release|Win32.ActiveCfg = Release|Win32
+		{BED7539C-0099-4A14-AD5D-30828F15A171}.Release|Win32.Build.0 = Release|Win32
+		{BED7539C-0099-4A14-AD5D-30828F15A171}.Release|x64.ActiveCfg = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -2040,6 +2092,7 @@ Global
 		{329FD5B0-EF28-4606-86D0-F6EA21CF8E36} = {E72B5BCB-6462-4D23-B419-3AF1A4AC3D78}
 		{1A3793D1-05D1-4B57-9B0F-5AF3E79DC439} = {E72B5BCB-6462-4D23-B419-3AF1A4AC3D78}
 		{11C9BC3D-45E9-46E3-BE84-B8CEE4685E39} = {E72B5BCB-6462-4D23-B419-3AF1A4AC3D78}
+		{A61D7CB4-75A5-4A55-8CA1-BE5AF615D921} = {E72B5BCB-6462-4D23-B419-3AF1A4AC3D78}
 		{3C977801-FE88-48F2-83D3-FA2EBFF6688E} = {E72B5BCB-6462-4D23-B419-3AF1A4AC3D78}
 		{432DB165-1EB2-4781-A9C0-71E62610B20A} = {E72B5BCB-6462-4D23-B419-3AF1A4AC3D78}
 		{EF300386-A8DF-4372-B6D8-FB9BFFCA9AED} = {E72B5BCB-6462-4D23-B419-3AF1A4AC3D78}

@@ -186,6 +186,34 @@ SWITCH_DECLARE(FILE *) switch_core_get_console(void)
 	return runtime.console;
 }
 
+#ifdef HAVE_SYS_IOCTL_H
+#include <sys/ioctl.h>
+#endif
+SWITCH_DECLARE(void) switch_core_screen_size(int *x, int *y)
+{
+
+#ifdef WIN32
+	CONSOLE_SCREEN_BUFFER_INFO csbi;
+	int ret;
+
+	if ((ret = GetConsoleScreenBufferInfo(GetStdHandle( STD_OUTPUT_HANDLE ), &csbi))) {
+		if (x) *x = csbi.dwSize.X;
+		if (y) *y = csbi.dwSize.Y;
+	}
+
+#elif defined(TIOCGWINSZ)
+	struct winsize w;
+	ioctl(0, TIOCGWINSZ, &w);
+
+	if (x) *x = w.ws_col;
+	if (y) *y = w.ws_row;
+#else
+	if (x) *x = 80;
+	if (y) *y = 24;
+#endif
+
+}
+
 SWITCH_DECLARE(FILE *) switch_core_data_channel(switch_text_channel_t channel)
 {
 	FILE *handle = stdout;
@@ -505,7 +533,7 @@ SWITCH_DECLARE(switch_thread_t *) switch_core_launch_thread(switch_thread_start_
 		ts->objs[0] = obj;
 		ts->objs[1] = thread;
 		switch_threadattr_stacksize_set(thd_attr, SWITCH_THREAD_STACKSIZE);
-		switch_threadattr_priority_increase(thd_attr);
+		switch_threadattr_priority_set(thd_attr, SWITCH_PRI_REALTIME);
 		switch_thread_create(&thread, thd_attr, func, ts, pool);
 	}
 
@@ -520,12 +548,16 @@ SWITCH_DECLARE(void) switch_core_set_globals(void)
 	DWORD dwBufSize = BUFSIZE;
 	char base_dir[1024];
 	char *lastbacklash;
+	char *tmp;
 
 	GetModuleFileName(NULL, base_dir, BUFSIZE);
 	lastbacklash = strrchr(base_dir, '\\');
 	base_dir[(lastbacklash - base_dir)] = '\0';
 	/* set base_dir as cwd, to be able to use relative paths in scripting languages (e.g. mod_lua) when FS is running as a service or while debugging FS using visual studio */
 	SetCurrentDirectory(base_dir);
+	tmp = switch_string_replace(base_dir, "\\", "/");
+	strcpy(base_dir, tmp);
+	free(tmp);
 
 #else
 	char base_dir[1024] = SWITCH_PREFIX_DIR;
@@ -540,6 +572,14 @@ SWITCH_DECLARE(void) switch_core_set_globals(void)
 		switch_snprintf(SWITCH_GLOBAL_dirs.mod_dir, BUFSIZE, "%s", SWITCH_MOD_DIR);
 #else
 		switch_snprintf(SWITCH_GLOBAL_dirs.mod_dir, BUFSIZE, "%s%smod", base_dir, SWITCH_PATH_SEPARATOR);
+#endif
+	}
+
+	if (!SWITCH_GLOBAL_dirs.lib_dir && (SWITCH_GLOBAL_dirs.lib_dir = (char *) malloc(BUFSIZE))) {
+#ifdef SWITCH_LIB_DIR
+		switch_snprintf(SWITCH_GLOBAL_dirs.lib_dir, BUFSIZE, "%s", SWITCH_LIB_DIR);
+#else
+		switch_snprintf(SWITCH_GLOBAL_dirs.lib_dir, BUFSIZE, "%s%slib", base_dir, SWITCH_PATH_SEPARATOR);
 #endif
 	}
 
@@ -629,6 +669,10 @@ SWITCH_DECLARE(void) switch_core_set_globals(void)
 #else
 #ifdef WIN32
 		GetTempPath(dwBufSize, lpPathBuffer);
+		lpPathBuffer[strlen(lpPathBuffer)-1] = 0;
+		tmp = switch_string_replace(lpPathBuffer, "\\", "/");
+		strcpy(lpPathBuffer, tmp);
+		free(tmp);
 		switch_snprintf(SWITCH_GLOBAL_dirs.temp_dir, BUFSIZE, "%s", lpPathBuffer);
 #else
 		switch_snprintf(SWITCH_GLOBAL_dirs.temp_dir, BUFSIZE, "%s", "/tmp");
@@ -638,6 +682,7 @@ SWITCH_DECLARE(void) switch_core_set_globals(void)
 
 	switch_assert(SWITCH_GLOBAL_dirs.base_dir);
 	switch_assert(SWITCH_GLOBAL_dirs.mod_dir);
+	switch_assert(SWITCH_GLOBAL_dirs.lib_dir);
 	switch_assert(SWITCH_GLOBAL_dirs.conf_dir);
 	switch_assert(SWITCH_GLOBAL_dirs.log_dir);
 	switch_assert(SWITCH_GLOBAL_dirs.run_dir);
@@ -699,14 +744,16 @@ SWITCH_DECLARE(int32_t) set_realtime_priority(void)
 	 * with a fallback if that does not work
 	 */
 	struct sched_param sched = { 0 };
-	sched.sched_priority = 1;
-	if (sched_setscheduler(0, SCHED_RR, &sched)) {
+	sched.sched_priority = SWITCH_PRI_LOW;
+	if (sched_setscheduler(0, SCHED_FIFO, &sched)) {
 		sched.sched_priority = 0;
 		if (sched_setscheduler(0, SCHED_OTHER, &sched)) {
 			return -1;
 		}
 	}
 #endif
+
+	
 
 #ifdef HAVE_SETPRIORITY
 	/*
@@ -926,19 +973,21 @@ SWITCH_DECLARE(switch_status_t) switch_core_mime_add_type(const char *type, cons
 static void load_mime_types(void)
 {
 	char *cf = "mime.types";
-	int fd = -1;
-	char line_buf[1024] = "";
+	FILE *fd = NULL;
+	char *line_buf = NULL;
+	switch_size_t llen = 0;
 	char *mime_path = NULL;
 
 	mime_path = switch_mprintf("%s/%s", SWITCH_GLOBAL_dirs.conf_dir, cf);
 	switch_assert(mime_path);
 
-	fd = open(mime_path, O_RDONLY | O_BINARY);
-	if (fd <= 0) {
+	fd = fopen(mime_path, "rb");
+
+	if (fd == NULL) {
 		goto end;
 	}
 
-	while ((switch_fd_read_line(fd, line_buf, sizeof(line_buf)))) {
+	while ((switch_fp_read_dline(fd, &line_buf, &llen))) {
 		char *p;
 		char *type = line_buf;
 
@@ -962,9 +1011,11 @@ static void load_mime_types(void)
 
 	}
 
-	if (fd > -1) {
-		close(fd);
-		fd = -1;
+	switch_safe_free(line_buf);
+
+	if (fd) {
+		fclose(fd);
+		fd = NULL;
 	}
 
   end:
@@ -1431,15 +1482,15 @@ SWITCH_DECLARE(switch_status_t) switch_core_init(switch_core_flag_t flags, switc
 	runtime.db_handle_timeout = 5000000;
 	
 	runtime.runlevel++;
-	runtime.sql_buffer_len = 1024 * 32;
-	runtime.max_sql_buffer_len = 1024 * 1024;
 	runtime.dummy_cng_frame.data = runtime.dummy_data;
 	runtime.dummy_cng_frame.datalen = sizeof(runtime.dummy_data);
 	runtime.dummy_cng_frame.buflen = sizeof(runtime.dummy_data);
+	runtime.dbname = "core";
 	switch_set_flag((&runtime.dummy_cng_frame), SFF_CNG);
 	switch_set_flag((&runtime), SCF_AUTO_SCHEMAS);
 	switch_set_flag((&runtime), SCF_CLEAR_SQL);
 	switch_set_flag((&runtime), SCF_API_EXPANSION);
+	switch_set_flag((&runtime), SCF_SESSION_THREAD_POOL);
 #ifdef WIN32
 	switch_set_flag((&runtime), SCF_THREADED_SYSTEM_EXEC);
 #endif
@@ -1683,7 +1734,7 @@ static void switch_load_core_config(const char *file)
 						switch_core_session_ctl(SCSC_LOGLEVEL, &level);
 					}
 #ifdef HAVE_SETRLIMIT
-				} else if (!strcasecmp(var, "dump-cores")) {
+				} else if (!strcasecmp(var, "dump-cores") && switch_true(val)) {
 					struct rlimit rlp;
 					memset(&rlp, 0, sizeof(rlp));
 					rlp.rlim_cur = RLIM_INFINITY;
@@ -1714,42 +1765,17 @@ static void switch_load_core_config(const char *file)
 					
 				} else if (!strcasecmp(var, "multiple-registrations")) {
 					runtime.multiple_registrations = switch_true(val);
-				} else if (!strcasecmp(var, "sql-buffer-len")) {
-					int tmp = atoi(val);
-
-					if (end_of(val) == 'k') {
-						tmp *= 1024;
-					} else if (end_of(val) == 'm') {
-						tmp *= (1024 * 1024);
-					}
-
-					if (tmp >= 32000 && tmp < 10500000) {
-						runtime.sql_buffer_len = tmp;
-					} else {
-						switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "sql-buffer-len: Value is not within rage 32k to 10m\n");
-					}
-				} else if (!strcasecmp(var, "max-sql-buffer-len")) {
-					int tmp = atoi(val);
-
-					if (end_of(val) == 'k') {
-						tmp *= 1024;
-					} else if (end_of(val) == 'm') {
-						tmp *= (1024 * 1024);
-					}
-
-					if (tmp < runtime.sql_buffer_len) {
-						switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Value is not larger than sql-buffer-len\n");
-					} else if (tmp >= 32000 && tmp < 10500000) {
-						runtime.sql_buffer_len = tmp;
-					} else {
-						switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "max-sql-buffer-len: Value is not within rage 32k to 10m\n");
-					}
-
 				} else if (!strcasecmp(var, "auto-create-schemas")) {
 					if (switch_true(val)) {
 						switch_set_flag((&runtime), SCF_AUTO_SCHEMAS);
 					} else {
 						switch_clear_flag((&runtime), SCF_AUTO_SCHEMAS);
+					}
+				} else if (!strcasecmp(var, "session-thread-pool")) {
+					if (switch_true(val)) {
+						switch_set_flag((&runtime), SCF_SESSION_THREAD_POOL);
+					} else {
+						switch_clear_flag((&runtime), SCF_SESSION_THREAD_POOL);
 					}
 				} else if (!strcasecmp(var, "auto-clear-sql")) {
 					if (switch_true(val)) {
@@ -1864,19 +1890,13 @@ static void switch_load_core_config(const char *file)
 				} else if (!strcasecmp(var, "core-db-name") && !zstr(val)) {
 					runtime.dbname = switch_core_strdup(runtime.memory_pool, val);
 				} else if (!strcasecmp(var, "core-db-dsn") && !zstr(val)) {
-					if (switch_odbc_available()) {
+					if (switch_odbc_available() || switch_pgsql_available()) {
 						runtime.odbc_dsn = switch_core_strdup(runtime.memory_pool, val);
-						if ((runtime.odbc_user = strchr(runtime.odbc_dsn, ':'))) {
-							*runtime.odbc_user++ = '\0';
-							if ((runtime.odbc_pass = strchr(runtime.odbc_user, ':'))) {
-								*runtime.odbc_pass++ = '\0';
-							}
-						}
 					} else {
-						switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "ODBC IS NOT AVAILABLE!\n");
+						switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "ODBC AND PGSQL ARE NOT AVAILABLE!\n");
 					}
-				} else if (!strcasecmp(var, "core-odbc-required") && !zstr(val)) {
-					switch_set_flag((&runtime), SCF_CORE_ODBC_REQ);
+				} else if (!strcasecmp(var, "core-non-sqlite-db-required") && !zstr(val)) {
+					switch_set_flag((&runtime), SCF_CORE_NON_SQLITE_DB_REQ);
 				} else if (!strcasecmp(var, "core-dbtype") && !zstr(val)) {
 					if (!strcasecmp(val, "MSSQL")) {
 						runtime.odbc_dbtype = DBTYPE_MSSQL;
@@ -1914,17 +1934,21 @@ SWITCH_DECLARE(const char *) switch_core_banner(void)
 {
 
 	return ("\n"
-			"   _____              ______        _____ _____ ____ _   _  \n"
-			"  |  ___| __ ___  ___/ ___\\ \\      / /_ _|_   _/ ___| | | | \n"
-			"  | |_ | '__/ _ \\/ _ \\___ \\\\ \\ /\\ / / | |  | || |   | |_| | \n"
-			"  |  _|| | |  __/  __/___) |\\ V  V /  | |  | || |___|  _  | \n"
-			"  |_|  |_|  \\___|\\___|____/  \\_/\\_/  |___| |_| \\____|_| |_| \n"
+			".=============================================================.\n"
+			"|   _____              ______        _____ _____ ____ _   _   |\n"
+			"|  |  ___| __ ___  ___/ ___\\ \\      / /_ _|_   _/ ___| | | |  |\n"
+			"|  | |_ | '__/ _ \\/ _ \\___ \\\\ \\ /\\ / / | |  | || |   | |_| |  |\n"
+			"|  |  _|| | |  __/  __/___) |\\ V  V /  | |  | || |___|  _  |  |\n"
+			"|  |_|  |_|  \\___|\\___|____/  \\_/\\_/  |___| |_| \\____|_| |_|  |\n"
+			"|                                                             |\n"
+			".=============================================================."
 			"\n"
-			"************************************************************\n"
-			"* Anthony Minessale II, Michael Jerris, Brian West, Others *\n"
-			"* FreeSWITCH (http://www.freeswitch.org)                   *\n"
-			"* Paypal Donations Appreciated: paypal@freeswitch.org      *\n"
-			"* Brought to you by ClueCon http://www.cluecon.com/        *\n" "************************************************************\n" 
+
+			"|   Anthony Minessale II, Michael Jerris, Brian West, Others  |\n"
+			"|   FreeSWITCH (http://www.freeswitch.org)                    |\n"
+			"|   Paypal Donations Appreciated: paypal@freeswitch.org       |\n"
+			"|   Brought to you by ClueCon http://www.cluecon.com/         |\n" 
+			".=============================================================.\n" 
 			"\n");
 }
 
@@ -1933,6 +1957,8 @@ SWITCH_DECLARE(switch_status_t) switch_core_init_and_modload(switch_core_flag_t 
 {
 	switch_event_t *event;
 	char *cmd;
+	int x = 0;
+	const char *use = NULL;
 #include "cc.h"
 
 
@@ -1969,14 +1995,32 @@ SWITCH_DECLARE(switch_status_t) switch_core_init_and_modload(switch_core_flag_t 
 		switch_event_fire(&event);
 	}
 
-	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CONSOLE, "%s%s", switch_core_banner(), cc);
+	switch_core_screen_size(&x, NULL);
+
+	use = (x > 100) ? cc : cc_s;
+
+#ifdef WIN32
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CONSOLE, "%s%s\n\n", switch_core_banner(), use);
+#else
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CONSOLE, "%s%s%s%s%s%s\n\n", 
+					  SWITCH_SEQ_DEFAULT_COLOR,
+					  SWITCH_SEQ_FYELLOW, SWITCH_SEQ_BBLUE,
+					  switch_core_banner(), 
+					  use, SWITCH_SEQ_DEFAULT_COLOR);
+	
+#endif
 
 
 	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CONSOLE,
-					  "\nFreeSWITCH Version %s (%s) Started.\nMax Sessions[%u]\nSession Rate[%d]\nSQL [%s]\n",
-					  SWITCH_VERSION_FULL, SWITCH_VERSION_FULL_HUMAN,
+					  "\nFreeSWITCH Version %s (%s)\n\nFreeSWITCH Started\nMax Sessions [%u]\nSession Rate [%d]\nSQL [%s]\n",
+					  SWITCH_VERSION_FULL, SWITCH_VERSION_REVISION_HUMAN,
 					  switch_core_session_limit(0),
 					  switch_core_sessions_per_second(0), switch_test_flag((&runtime), SCF_USE_SQL) ? "Enabled" : "Disabled");
+
+
+	if (x < 160) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CONSOLE, "\n[This app Best viewed at 160x60 or more..]\n");
+	}
 
 	switch_clear_flag((&runtime), SCF_NO_NEW_SESSIONS);
 
@@ -2089,6 +2133,44 @@ SWITCH_DECLARE(int32_t) switch_core_session_ctl(switch_session_ctl_t cmd, void *
 	}
 
 	switch (cmd) {
+	case SCSC_RECOVER:
+		{
+			char *arg = (char *) val;
+			char *tech = NULL, *prof = NULL;
+			int r, flush = 0;
+
+			if (!zstr(arg)) {
+				tech = strdup(arg);
+				
+				if ((prof = strchr(tech, ':'))) {
+					*prof++ = '\0';
+				}
+
+				if (!strcasecmp(tech, "flush")) {
+					flush++;
+
+					if (prof) {
+						tech = prof;
+						if ((prof = strchr(tech, ':'))) {
+							*prof++ = '\0';
+						}
+					}
+				}
+
+			}
+
+			if (flush) {
+				switch_core_recovery_flush(tech, prof);
+				r = -1;
+			} else {
+				r = switch_core_recovery_recover(tech, prof);
+			}
+
+			switch_safe_free(tech);
+			return r;
+
+		}
+		break;
 	case SCSC_DEBUG_SQL:
 		{
 			if (switch_test_flag((&runtime), SCF_DEBUG_SQL)) {
@@ -2154,9 +2236,9 @@ SWITCH_DECLARE(int32_t) switch_core_session_ctl(switch_session_ctl_t cmd, void *
 		break;
 	case SCSC_SQL:
 		if (oldintval) {
-			switch_core_sqldb_start_thread();
+			switch_core_sqldb_resume();
 		} else {
-			switch_core_sqldb_stop_thread();
+			switch_core_sqldb_pause();
 		}
 		break;
 	case SCSC_PAUSE_ALL:
@@ -2346,6 +2428,11 @@ SWITCH_DECLARE(switch_core_flag_t) switch_core_flags(void)
 	return runtime.flags;
 }
 
+SWITCH_DECLARE(switch_bool_t) switch_core_running(void)
+{
+	return runtime.running ? SWITCH_TRUE : SWITCH_FALSE;
+}
+
 SWITCH_DECLARE(switch_bool_t) switch_core_ready(void)
 {
 	return (switch_test_flag((&runtime), SCF_SHUTTING_DOWN) || switch_test_flag((&runtime), SCF_NO_NEW_SESSIONS) == SCF_NO_NEW_SESSIONS) ? SWITCH_FALSE : SWITCH_TRUE;
@@ -2392,7 +2479,7 @@ SWITCH_DECLARE(switch_status_t) switch_core_destroy(void)
 		switch_nat_shutdown();
 	}
 	switch_xml_destroy();
-
+	switch_core_session_uninit();
 	switch_console_shutdown();
 
 	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CONSOLE, "Closing Event Engine.\n");
@@ -2593,14 +2680,32 @@ SWITCH_DECLARE(void) switch_close_extra_files(int *keep, int keep_ttl)
 }
 
 
-
 #ifdef WIN32
 static int switch_system_fork(const char *cmd, switch_bool_t wait)
 {
 	return switch_system_thread(cmd, wait);
 }
 
+SWITCH_DECLARE(pid_t) switch_fork(void)
+{
+	return -1;
+}
+
+
 #else
+
+SWITCH_DECLARE(pid_t) switch_fork(void)
+{
+	int i = fork();
+
+	if (!i) {
+		set_low_priority();
+	}
+
+	return i;
+}
+
+
 
 static int switch_system_fork(const char *cmd, switch_bool_t wait)
 {
@@ -2609,7 +2714,7 @@ static int switch_system_fork(const char *cmd, switch_bool_t wait)
 
 	switch_core_set_signal_handlers();
 
-	pid = fork();
+	pid = switch_fork();
 	
 	if (pid) {
 		if (wait) {
@@ -2619,7 +2724,6 @@ static int switch_system_fork(const char *cmd, switch_bool_t wait)
 	} else {
 		switch_close_extra_files(NULL, 0);
 		
-		set_low_priority();
 		if (system(dcmd) == -1) {
 			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Failed to execute because of a command error : %s\n", dcmd);
 		}
@@ -2655,7 +2759,7 @@ SWITCH_DECLARE(int) switch_stream_system_fork(const char *cmd, switch_stream_han
 	if (pipe(fds)) {
 		goto end;
 	} else {					/* good to go */
-		pid = fork();
+		pid = switch_fork();
 
 		if (pid < 0) {			/* ok maybe not */
 			close(fds[0]);

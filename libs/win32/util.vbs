@@ -131,7 +131,9 @@ Sub UnCompress(Archive, DestFolder)
 	Do
 		WScript.Echo OExec.StdOut.ReadLine()
 	Loop While Not OExec.StdOut.atEndOfStream
-	If FSO.FileExists(Left(Archive, Len(Archive)-3))Then  
+	If FSO.FileExists(Left(Archive, Len(Archive)-3))Then
+		WScript.Sleep(100)
+		FSO.DeleteFile UtilsDir & batname, True  
 		Set MyFile = fso.CreateTextFile(UtilsDir & batname, True)
 		MyFile.WriteLine("@" & quote & UtilsDir & "7za.exe" & quote & " x " & quote & Left(Archive, Len(Archive)-3) & quote & " -y -o" & quote & DestFolder & quote )
 		MyFile.Close
@@ -142,7 +144,9 @@ Sub UnCompress(Archive, DestFolder)
 		WScript.Sleep(500)
 		FSO.DeleteFile Left(Archive, Len(Archive)-3) ,true 
 	End If
-	If FSO.FileExists(Left(Archive, Len(Archive)-3) & "tar")Then  
+	If FSO.FileExists(Left(Archive, Len(Archive)-3) & "tar")Then 
+		WScript.Sleep(100)
+		FSO.DeleteFile UtilsDir & batname, True 
 		Set MyFile = fso.CreateTextFile(UtilsDir & batname, True)
 		MyFile.WriteLine("@" & quote & UtilsDir & "7za.exe" & quote & " x " & quote & Left(Archive, Len(Archive)-3) & "tar" & quote & " -y -o" & quote & DestFolder & quote )
 		MyFile.Close
@@ -321,6 +325,7 @@ Sub CreateVersion(tmpFolder, VersionDir, includebase, includedest)
 	strVerMinor = FindVersionStringInConfigure(VersionDir & "configure.in", "SWITCH_VERSION_MINOR")
 	strVerMicro = FindVersionStringInConfigure(VersionDir & "configure.in", "SWITCH_VERSION_MICRO")
 	strVerRev   = FindVersionStringInConfigure(VersionDir & "configure.in", "SWITCH_VERSION_REVISION")
+	strVerHuman = FindVersionStringInConfigure(VersionDir & "configure.in", "SWITCH_VERSION_REVISION_HUMAN")
 	
 	'Set version to the one reported by configure.in
 	If strVerRev <> "" Then
@@ -329,6 +334,7 @@ Sub CreateVersion(tmpFolder, VersionDir, includebase, includedest)
 
 	Dim sLastFile
 	Const ForReading = 1
+	Const ShowUnclean = False 'Don't show unclean state for now
 
 	'Try To read revision from git
 	If FSO.FolderExists(VersionDir & ".git") Then
@@ -337,47 +343,47 @@ Sub CreateVersion(tmpFolder, VersionDir, includebase, includedest)
 		If IsNumeric(strFromProc) Then
 			lastChangedDateTime = DateAdd("s", strFromProc, "01/01/1970 00:00:00")
 			strLastCommit = YEAR(lastChangedDateTime) & Pd(Month(lastChangedDateTime), 2) & Pd(DAY(lastChangedDateTime), 2) & "T" & Pd(Hour(lastChangedDateTime), 2) & Pd(Minute(lastChangedDateTime), 2) & Pd(Second(lastChangedDateTime), 2) & "Z"
+			strLastCommitHuman = YEAR(lastChangedDateTime) & "-" & Pd(Month(lastChangedDateTime), 2) & "-" & Pd(DAY(lastChangedDateTime), 2) & " " & Pd(Hour(lastChangedDateTime), 2) & ":" & Pd(Minute(lastChangedDateTime), 2) & ":" & Pd(Second(lastChangedDateTime), 2) & "Z"
 		Else
-			strLastCommit = "UNKNOWN"
+			strLastCommit = ""
+			strLastCommitHuman = ""
 		End If
 
 		'Get revision hash
 		strRevision = ExecAndGetResult(tmpFolder, VersionDir, "git rev-list -n1 --abbrev=10 --abbrev-commit HEAD")
+		strRevisionHuman = ExecAndGetResult(tmpFolder, VersionDir, "git rev-list -n1 --abbrev=7 --abbrev-commit HEAD")
 		
-		If strRevision = "" Then
-			strRevision = "UNKNOWN"
-		End If
+		If strLastCommit <> "" And strLastCommitHuman <> "" And strRevision <> "" And strRevisionHuman <> "" Then
+			'Bild version string
+			strGitVer = "+git~" & strLastCommit & "~" & strRevision
+			strVerHuman = "git " & strRevisionHuman & " " & strLastCommitHuman
 
-		'Bild version string
-		strGitVer="git~" & strLastCommit & "~" & strRevision
-
-		'Check for local changes, if found, append to git revision string
-		If ExecAndGetExitCode(tmpFolder, VersionDir, "git diff-index --quiet HEAD") <> 0 Then
-			lastChangedDateTime = GetTimeUTC()
-			strGitVer = strGitVer & "+unclean~" & YEAR(lastChangedDateTime) & Pd(Month(lastChangedDateTime), 2) & Pd(DAY(lastChangedDateTime), 2) & "T" & Pd(Hour(lastChangedDateTime), 2) & Pd(Minute(lastChangedDateTime), 2) & Pd(Second(lastChangedDateTime), 2) & "Z"
-		End If
-
-		If strVerRev = "" Then
-			VERSION=strGitVer
+			'Check for local changes, if found, append to git revision string
+			If ShowUnclean Then
+				If ExecAndGetExitCode(tmpFolder, VersionDir, "git diff-index --quiet HEAD") <> 0 Then
+					lastChangedDateTime = GetTimeUTC()
+					strGitVer = strGitVer & "+unclean~" & YEAR(lastChangedDateTime) & Pd(Month(lastChangedDateTime), 2) & Pd(DAY(lastChangedDateTime), 2) & "T" & Pd(Hour(lastChangedDateTime), 2) & Pd(Minute(lastChangedDateTime), 2) & Pd(Second(lastChangedDateTime), 2) & "Z"
+					strVerHuman = strVerHuman & " unclean " & YEAR(lastChangedDateTime) & "-" & Pd(Month(lastChangedDateTime), 2) & "-" & Pd(DAY(lastChangedDateTime), 2) & " " & Pd(Hour(lastChangedDateTime), 2) & ":" & Pd(Minute(lastChangedDateTime), 2) & ":" & Pd(Second(lastChangedDateTime), 2) & "Z"
+				End If
+			End If
 		Else
-			VERSION=VERSION & "+" & strGitVer
+			strGitVer = ""
+			strVerHuman = ""
 		End If
+
+		VERSION=VERSION & strGitVer
 
 		sLastVersion = ""
-		Set sLastFile = FSO.OpenTextFile(tmpFolder & "lastversion", ForReading, true, OpenAsASCII)
+		Set sLastFile = FSO.OpenTextFile(tmpFolder & "lastversion", ForReading, True, OpenAsASCII)
 		If Not sLastFile.atEndOfStream Then
 			sLastVersion = sLastFile.ReadLine()
 		End If
 		sLastFile.Close
 	End If
 	
-	If VERSION = "" Then
-		VERSION = "-UNKNOWN"
-	End If
-
-	If VERSION <> sLastVersion Then
+	If VERSION & " " & strVerHuman <> sLastVersion Then
 		Set MyFile = fso.CreateTextFile(tmpFolder & "lastversion", True)
-		MyFile.WriteLine(VERSION)
+		MyFile.WriteLine(VERSION & " " & strVerHuman)
 		MyFile.Close
 	
 		FSO.CopyFile includebase, includedest, true
@@ -385,6 +391,7 @@ Sub CreateVersion(tmpFolder, VersionDir, includebase, includedest)
 		FindReplaceInFile includedest, "@SWITCH_VERSION_MAJOR@", strVerMajor
 		FindReplaceInFile includedest, "@SWITCH_VERSION_MINOR@", strVerMinor
 		FindReplaceInFile includedest, "@SWITCH_VERSION_MICRO@", strVerMicro
+		FindReplaceInFile includedest, "@SWITCH_VERSION_REVISION_HUMAN@", strVerHuman
 	End If
 	
 End Sub

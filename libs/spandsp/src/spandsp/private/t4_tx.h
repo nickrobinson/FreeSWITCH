@@ -36,7 +36,9 @@ typedef struct
     /*! \brief The libtiff context for the current TIFF file */
     TIFF *tiff_file;
 
-    /*! Image type - bilevel, gray, colour */
+    /*! \brief The compression type used in the TIFF file */
+    uint16_t compression;
+    /*! \brief Image type - bi-level, gray, colour, etc. */
     int image_type;
     /*! \brief The TIFF photometric setting for the current page. */
     uint16_t photo_metric;
@@ -94,6 +96,11 @@ struct t4_tx_state_s
     int line_encoding_gray;
     int line_encoding_colour;
 
+    /*! \brief When superfine and fine resolution images need to be squahed vertically
+               to a lower resolution, this value sets the number of source rows which
+               must be squashed to form each row on the wire. */
+    int row_squashing_ratio;
+
     /*! \brief The width of the current page, in pixels. */
     uint32_t image_width;
     /*! \brief The length of the current page, in pixels. */
@@ -144,6 +151,8 @@ struct t4_tx_state_s
 
     int apply_lab;
     lab_params_t lab_params;
+    uint8_t *colour_map;
+    int colour_map_entries;
 
     /* Supporting information, like resolutions, which the backend may want. */
     t4_tx_metadata_t metadata;

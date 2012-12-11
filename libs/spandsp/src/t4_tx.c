@@ -79,8 +79,14 @@
 
 #include "faxfont.h"
 
+#if defined(SPANDSP_SUPPORT_TIFF_FX)
+#include <tif_dir.h>
+#endif
+
 /*! The number of centimetres in one inch */
 #define CM_PER_INCH                 2.54f
+
+static void t4_tx_set_image_length(t4_tx_state_t *s, int image_length);
 
 #if defined(SPANDSP_SUPPORT_TIFF_FX)
 /* TIFF-FX related extensions to the tag set supported by libtiff */
@@ -93,21 +99,37 @@ static const TIFFFieldInfo tiff_fx_tiff_field_info[] =
     {TIFFTAG_CODINGMETHODS, 1, 1, TIFF_LONG, FIELD_CUSTOM, FALSE, FALSE, (char *) "CodingMethods"},
     {TIFFTAG_VERSIONYEAR, 4, 4, TIFF_BYTE, FIELD_CUSTOM, FALSE, FALSE, (char *) "VersionYear"},
     {TIFFTAG_MODENUMBER, 1, 1, TIFF_BYTE, FIELD_CUSTOM, FALSE, FALSE, (char *) "ModeNumber"},
-    {TIFFTAG_DECODE, TIFF_VARIABLE, TIFF_VARIABLE, TIFF_SRATIONAL, FIELD_CUSTOM, FALSE, FALSE, (char *) "Decode"},
-    {TIFFTAG_IMAGEBASECOLOR, TIFF_SPP, TIFF_SPP, TIFF_SHORT, FIELD_CUSTOM, FALSE, FALSE, (char *) "ImageBaseColor"},
+    {TIFFTAG_DECODE, TIFF_VARIABLE, TIFF_VARIABLE, TIFF_SRATIONAL, FIELD_CUSTOM, FALSE, TRUE, (char *) "Decode"},
+    {TIFFTAG_IMAGEBASECOLOR, TIFF_VARIABLE, TIFF_VARIABLE, TIFF_SHORT, FIELD_CUSTOM, FALSE, TRUE, (char *) "ImageBaseColor"},
     {TIFFTAG_T82OPTIONS, 1, 1, TIFF_LONG, FIELD_CUSTOM, FALSE, FALSE, (char *) "T82Options"},
     {TIFFTAG_STRIPROWCOUNTS, TIFF_VARIABLE, TIFF_VARIABLE, TIFF_LONG, FIELD_CUSTOM, FALSE, TRUE, (char *) "StripRowCounts"},
     {TIFFTAG_IMAGELAYER, 2, 2, TIFF_LONG, FIELD_CUSTOM, FALSE, FALSE, (char *) "ImageLayer"},
 };
 
-static void t4_tx_set_image_length(t4_tx_state_t *s, int image_length);
+static TIFFField tiff_fx_tiff_fields[] =
+{
+    { TIFFTAG_INDEXED, 1, 1, TIFF_SHORT, 0, TIFF_SETGET_UINT16, TIFF_SETGET_UNDEFINED, FIELD_CUSTOM, 1, 0, (char *) "Indexed" },
+    { TIFFTAG_GLOBALPARAMETERSIFD, 1, 1, TIFF_LONG, 0, TIFF_SETGET_UINT32, TIFF_SETGET_UNDEFINED, FIELD_CUSTOM, 1, 0, (char *) "GlobalParametersIFD", NULL },
+    { TIFFTAG_PROFILETYPE, 1, 1, TIFF_LONG, 0, TIFF_SETGET_UINT32, TIFF_SETGET_UNDEFINED, FIELD_CUSTOM, 1, 0, (char *) "ProfileType", NULL },
+    { TIFFTAG_FAXPROFILE, 1, 1, TIFF_BYTE, 0, TIFF_SETGET_UINT8, TIFF_SETGET_UNDEFINED, FIELD_CUSTOM, 1, 0, (char *) "FaxProfile", NULL },
+    { TIFFTAG_CODINGMETHODS, 1, 1, TIFF_LONG, 0, TIFF_SETGET_UINT32, TIFF_SETGET_UNDEFINED, FIELD_CUSTOM, 1, 0, (char *) "CodingMethods", NULL },
+    { TIFFTAG_VERSIONYEAR, 4, 4, TIFF_BYTE, 0, TIFF_SETGET_C0_UINT8, TIFF_SETGET_UNDEFINED, FIELD_CUSTOM, 1, 0, (char *) "VersionYear", NULL },
+    { TIFFTAG_MODENUMBER, 1, 1, TIFF_BYTE, 0, TIFF_SETGET_UINT8, TIFF_SETGET_UNDEFINED, FIELD_CUSTOM, 1, 0, (char *) "ModeNumber", NULL },
+    { TIFFTAG_DECODE, -1, -1, TIFF_SRATIONAL, 0, TIFF_SETGET_C16_FLOAT, TIFF_SETGET_UNDEFINED, FIELD_CUSTOM, 1, 1, (char *) "Decode", NULL },
+    { TIFFTAG_IMAGEBASECOLOR, -1, -1, TIFF_SHORT, 0, TIFF_SETGET_C16_UINT16, TIFF_SETGET_UNDEFINED, FIELD_CUSTOM, 1, 1, (char *) "ImageBaseColor", NULL },
+    { TIFFTAG_T82OPTIONS, 1, 1, TIFF_LONG, 0, TIFF_SETGET_UINT32, TIFF_SETGET_UNDEFINED, FIELD_CUSTOM, 1, 0, (char *) "T82Options", NULL },
+    { TIFFTAG_STRIPROWCOUNTS, -1, -1, TIFF_LONG, 0, TIFF_SETGET_C16_UINT32, TIFF_SETGET_UNDEFINED, FIELD_CUSTOM, 1, 1, (char *) "StripRowCounts", NULL },
+    { TIFFTAG_IMAGELAYER, 2, 2, TIFF_LONG, 0, TIFF_SETGET_C0_UINT32, TIFF_SETGET_UNDEFINED, FIELD_CUSTOM, 1, 0, (char *) "ImageLayer", NULL },
+};
+
+TIFFFieldArray tiff_fx_field_array = { tfiatOther, 0, 12, tiff_fx_tiff_fields };
 
 static TIFFExtendProc _ParentExtender = NULL;
 
 static void TIFFFXDefaultDirectory(TIFF *tif)
 {
     /* Install the extended tag field info */
-    TIFFMergeFieldInfo(tif, tiff_fx_tiff_field_info, 11);
+    TIFFMergeFieldInfo(tif, tiff_fx_tiff_field_info, 12);
 
     /* Since we may have overriddden another directory method, we call it now to
        allow it to set up the rest of its own methods. */
@@ -137,6 +159,52 @@ static int test_resolution(int res_unit, float actual, float expected)
     return (expected*0.95f <= actual  &&  actual <= expected*1.05f);
 }
 /*- End of function --------------------------------------------------------*/
+
+#if defined(SPANDSP_SUPPORT_TIFF_FX)
+static int read_colour_map(t4_tx_state_t *s, int bits_per_sample)
+{
+    int i;
+    uint16_t *map_L;
+    uint16_t *map_a;
+    uint16_t *map_b;
+    uint16_t *map_z;
+
+    map_L = NULL;
+    map_a = NULL;
+    map_b = NULL;
+    map_z = NULL;
+    if (!TIFFGetField(s->tiff.tiff_file, TIFFTAG_COLORMAP, &map_L, &map_a, &map_b, &map_z))
+        return -1;
+    
+    /* TODO: This only allows for 8 bit deep maps */
+    if ((s->colour_map = realloc(s->colour_map, 3*256)) == NULL)
+        return -1;
+    span_log(&s->logging, SPAN_LOG_FLOW, "Got a colour map\n");
+#if 0
+    /* Sweep the colormap in the proper order */
+    for (i = 0;  i < (1 << bits_per_sample);  i++)
+    {
+        s->colour_map[3*i + 0] = (map_L[i] >> 8) & 0xFF;
+        s->colour_map[3*i + 1] = (map_a[i] >> 8) & 0xFF;
+        s->colour_map[3*i + 2] = (map_b[i] >> 8) & 0xFF;
+        span_log(&s->logging, SPAN_LOG_FLOW, "Map %3d - %5d %5d %5d\n", i, s->colour_map[3*i], s->colour_map[3*i + 1], s->colour_map[3*i + 2]);
+    }
+#else
+    /* Sweep the colormap in the order that seems to work for l04x_02x.tif */
+    for (i = 0;  i < (1 << bits_per_sample);  i++)
+    {
+        s->colour_map[0*256 + i] = (map_L[i] >> 8) & 0xFF;
+        s->colour_map[1*256 + i] = (map_a[i] >> 8) & 0xFF;
+        s->colour_map[2*256 + i] = (map_b[i] >> 8) & 0xFF;
+    }
+#endif
+    lab_to_srgb(&s->lab_params, s->colour_map, s->colour_map, 256);
+    for (i = 0;  i < (1 << bits_per_sample);  i++)
+        span_log(&s->logging, SPAN_LOG_FLOW, "Map %3d - %5d %5d %5d\n", i, s->colour_map[3*i], s->colour_map[3*i + 1], s->colour_map[3*i + 2]);
+    return 0;
+}
+/*- End of function --------------------------------------------------------*/
+#endif
 
 static int get_tiff_directory_info(t4_tx_state_t *s)
 {
@@ -170,28 +238,40 @@ static int get_tiff_directory_info(t4_tx_state_t *s)
         {1200.0f/CM_PER_INCH, T4_Y_RESOLUTION_1200},
         {             -1.00f, -1}
     };
-    uint16_t res_unit;
-    uint8_t parm8;
-    uint16_t parm16;
-    uint32_t parm32;
+#if defined(SPANDSP_SUPPORT_TIFF_FX)
+    static const char *tiff_fx_fax_profiles[] =
+    {
+        "???",
+        "profile S",
+        "profile F",
+        "profile J",
+        "profile C",
+        "profile L",
+        "profile M"
+    };
     char *u;
     char uu[10];
+    uint8_t parm8;
+    uint16_t parm16;
+#endif
+    uint32_t parm32;
     float x_resolution;
     float y_resolution;
     int i;
     t4_tx_tiff_state_t *t;
     uint16_t bits_per_sample;
     uint16_t samples_per_pixel;
+    uint16_t res_unit;
 
     t = &s->tiff;
-    parm16 = 0;
-    TIFFGetField(t->tiff_file, TIFFTAG_BITSPERSAMPLE, &parm16);
-    bits_per_sample = parm16;
-    parm16 = 0;
-    TIFFGetField(t->tiff_file, TIFFTAG_SAMPLESPERPIXEL, &parm16);
-    samples_per_pixel = parm16;
+    bits_per_sample = 1;
+    TIFFGetField(t->tiff_file, TIFFTAG_BITSPERSAMPLE, &bits_per_sample);
+    samples_per_pixel = 1;
+    TIFFGetField(t->tiff_file, TIFFTAG_SAMPLESPERPIXEL, &samples_per_pixel);
     if (samples_per_pixel == 1  &&  bits_per_sample == 1)
         t->image_type = T4_IMAGE_TYPE_BILEVEL;
+    else if (samples_per_pixel == 3  &&  bits_per_sample == 1)
+        t->image_type = T4_IMAGE_TYPE_COLOUR_BILEVEL;
     else if (samples_per_pixel == 1  &&  bits_per_sample == 8)
         t->image_type = T4_IMAGE_TYPE_GRAY_8BIT;
     else if (samples_per_pixel == 1  &&  bits_per_sample > 8)
@@ -222,8 +302,12 @@ static int get_tiff_directory_info(t4_tx_state_t *s)
     TIFFGetField(t->tiff_file, TIFFTAG_RESOLUTIONUNIT, &res_unit);
     t->photo_metric = PHOTOMETRIC_MINISWHITE;
     TIFFGetField(t->tiff_file, TIFFTAG_PHOTOMETRIC, &t->photo_metric);
-    /* TIFFGetField(t->tiff_file, TIFFTAG_COMPRESSION, &t->????); */
 
+    set_lab_illuminant(&s->lab_params, 0.9638f, 1.0f, 0.8245f);
+    set_lab_gamut(&s->lab_params, 0, 100, -85, 85, -75, 125, FALSE);
+
+    t->compression = -1;
+    TIFFGetField(t->tiff_file, TIFFTAG_COMPRESSION, &t->compression);
     t->fill_order = FILLORDER_LSB2MSB;
 
     /* Allow a little range for the X resolution in centimeters. The spec doesn't pin down the
@@ -250,29 +334,22 @@ static int get_tiff_directory_info(t4_tx_state_t *s)
     }
     t4_tx_set_image_width(s, s->image_width);
     t4_tx_set_image_length(s, s->image_length);
-    switch (s->line_encoding)
-    {
-    case T4_COMPRESSION_ITU_T4_1D:
-    case T4_COMPRESSION_ITU_T4_2D:
-    case T4_COMPRESSION_ITU_T6:
-        t4_t6_encode_set_max_2d_rows_per_1d_row(&s->encoder.t4_t6, -s->metadata.y_resolution);
-        break;
-    }
+    t4_tx_set_max_2d_rows_per_1d_row(s, -s->metadata.y_resolution);
 #if defined(SPANDSP_SUPPORT_TIFF_FX)
     if (TIFFGetField(t->tiff_file, TIFFTAG_PROFILETYPE, &parm32))
-        printf("Profile type %u\n", parm32);
+        span_log(&s->logging, SPAN_LOG_FLOW, "Profile type %u\n", parm32);
     if (TIFFGetField(t->tiff_file, TIFFTAG_FAXPROFILE, &parm8))
-        printf("FAX profile %u\n", parm8);
+        span_log(&s->logging, SPAN_LOG_FLOW, "FAX profile %s (%u)\n", tiff_fx_fax_profiles[parm8], parm8);
     if (TIFFGetField(t->tiff_file, TIFFTAG_CODINGMETHODS, &parm32))
-        printf("Coding methods 0x%x\n", parm32);
+        span_log(&s->logging, SPAN_LOG_FLOW, "Coding methods 0x%x\n", parm32);
     if (TIFFGetField(t->tiff_file, TIFFTAG_VERSIONYEAR, &u))
     {
         memcpy(uu, u, 4);
         uu[4] = '\0';
-        printf("Version year \"%s\"\n", uu);
+        span_log(&s->logging, SPAN_LOG_FLOW, "Version year \"%s\"\n", uu);
     }
     if (TIFFGetField(t->tiff_file, TIFFTAG_MODENUMBER, &parm8))
-        printf("Mode number %u\n", parm8);
+        span_log(&s->logging, SPAN_LOG_FLOW, "Mode number %u\n", parm8);
 #endif
     return 0;
 }
@@ -311,22 +388,42 @@ static int test_tiff_directory_info(t4_tx_state_t *s)
         {             -1.00f, -1}
     };
     uint16_t res_unit;
-    uint16_t parm16;
     uint32_t parm32;
     float x_resolution;
     float y_resolution;
+    uint16_t bits_per_sample;
+    uint16_t samples_per_pixel;
+    int image_type;
     int i;
     t4_tx_tiff_state_t *t;
 
     t = &s->tiff;
-    parm16 = 0;
-    TIFFGetField(t->tiff_file, TIFFTAG_BITSPERSAMPLE, &parm16);
-    if (parm16 != 1)
+    bits_per_sample = 1;
+    TIFFGetField(t->tiff_file, TIFFTAG_BITSPERSAMPLE, &bits_per_sample);
+    samples_per_pixel = 1;
+    TIFFGetField(t->tiff_file, TIFFTAG_SAMPLESPERPIXEL, &samples_per_pixel);
+    if (samples_per_pixel == 1  &&  bits_per_sample == 1)
+        image_type = T4_IMAGE_TYPE_BILEVEL;
+    else if (samples_per_pixel == 3  &&  bits_per_sample == 1)
+        image_type = T4_IMAGE_TYPE_COLOUR_BILEVEL;
+    else if (samples_per_pixel == 1  &&  bits_per_sample == 8)
+        image_type = T4_IMAGE_TYPE_GRAY_8BIT;
+    else if (samples_per_pixel == 1  &&  bits_per_sample > 8)
+        image_type = T4_IMAGE_TYPE_GRAY_12BIT;
+    else if (samples_per_pixel == 3  &&  bits_per_sample == 8)
+        image_type = T4_IMAGE_TYPE_COLOUR_8BIT;
+    else if (samples_per_pixel == 3  &&  bits_per_sample > 8)
+        image_type = T4_IMAGE_TYPE_COLOUR_12BIT;
+    else
+        image_type = -1;
+#if 0
+    /* Limit ourselves to plain black and white pages */
+    if (t->image_type != T4_IMAGE_TYPE_BILEVEL)
         return -1;
-    parm16 = 0;
-    TIFFGetField(t->tiff_file, TIFFTAG_SAMPLESPERPIXEL, &parm16);
-    if (parm16 != 1)
-        return -1;
+#endif
+    if (s->tiff.image_type != image_type)
+        return 1;
+
     parm32 = 0;
     TIFFGetField(t->tiff_file, TIFFTAG_IMAGEWIDTH, &parm32);
     if (s->image_width != (int) parm32)
@@ -387,12 +484,23 @@ static int open_tiff_input_file(t4_tx_state_t *s, const char *file)
 static int tiff_row_read_handler(void *user_data, uint8_t buf[], size_t len)
 {
     t4_tx_state_t *s;
+    int i;
+    int j;
 
     s = (t4_tx_state_t *) user_data;
     if (s->tiff.row >= s->image_length)
         return 0;
     memcpy(buf, &s->tiff.image_buffer[s->tiff.row*len], len);
     s->tiff.row++;
+
+    /* If this is a bi-level image which has more vertical resolution than the
+       far end will accept, we need to squash it down to size. */
+    for (i = 1;  i < s->row_squashing_ratio  &&  s->tiff.row < s->image_length;  i++)
+    {
+        for (j = 0;  j < s->image_width/8;  j++)
+            buf[j] |= s->tiff.image_buffer[s->tiff.row*len + j];
+        s->tiff.row++;
+    }
     return len;
 }
 /*- End of function --------------------------------------------------------*/
@@ -400,7 +508,7 @@ static int tiff_row_read_handler(void *user_data, uint8_t buf[], size_t len)
 static int row_read(void *user_data, uint8_t buf[], size_t len)
 {
     t4_tx_state_t *s;
-    
+
     s = (t4_tx_state_t *) user_data;
 
     if (s->tiff.raw_row >= s->tiff.image_length)
@@ -614,6 +722,7 @@ static int header_row_read_handler(void *user_data, uint8_t buf[], size_t len)
         repeats = 1;
         break;
     }
+    repeats /= s->row_squashing_ratio;
     if (s->header_overlays_image)
     {
         /* Read and dump a row of the real image, allowing for the possibility
@@ -636,8 +745,17 @@ static int header_row_read_handler(void *user_data, uint8_t buf[], size_t len)
         buf[pos++] = 0;
     s->header_row++;
     if (s->header_row >= 16*repeats)
+    {
+        /* End of header. Change to normal image row data. */
         set_row_read_handler(s, s->row_handler, s->row_handler_user_data);
+    }
     return len;
+}
+/*- End of function --------------------------------------------------------*/
+
+SPAN_DECLARE(void) t4_tx_set_row_squashing_ratio(t4_tx_state_t *s, int row_squashing_ratio)
+{
+    s->row_squashing_ratio = row_squashing_ratio;
 }
 /*- End of function --------------------------------------------------------*/
 
@@ -900,57 +1018,52 @@ SPAN_DECLARE(void) t4_tx_get_transfer_statistics(t4_tx_state_t *s, t4_stats_t *t
 }
 /*- End of function --------------------------------------------------------*/
 
-SPAN_DECLARE(int) t4_tx_check_bit(t4_tx_state_t *s)
-{
-    return t4_t6_encode_check_bit(&s->encoder.t4_t6);
-}
-/*- End of function --------------------------------------------------------*/
-
-SPAN_DECLARE(int) t4_tx_get_bit(t4_tx_state_t *s)
-{
-    return t4_t6_encode_get_bit(&s->encoder.t4_t6);
-}
-/*- End of function --------------------------------------------------------*/
-
-SPAN_DECLARE(int) t4_tx_get_byte(t4_tx_state_t *s)
+SPAN_DECLARE(int) t4_tx_image_complete(t4_tx_state_t *s)
 {
     switch (s->line_encoding)
     {
     case T4_COMPRESSION_ITU_T4_1D:
     case T4_COMPRESSION_ITU_T4_2D:
     case T4_COMPRESSION_ITU_T6:
-        return t4_t6_encode_get_byte(&s->encoder.t4_t6);
+        return t4_t6_encode_image_complete(&s->encoder.t4_t6);
     case T4_COMPRESSION_ITU_T42:
-        return t42_encode_get_byte(&s->encoder.t42);
+        return t42_encode_image_complete(&s->encoder.t42);
 #if defined(SPANDSP_SUPPORT_T43)
     case T4_COMPRESSION_ITU_T43:
-        return t43_encode_get_byte(&s->encoder.t43);
+        return t43_encode_image_complete(&s->encoder.t43);
 #endif
     case T4_COMPRESSION_ITU_T85:
     case T4_COMPRESSION_ITU_T85_L0:
-        return t85_encode_get_byte(&s->encoder.t85);
+        return t85_encode_image_complete(&s->encoder.t85);
     }
     return SIG_STATUS_END_OF_DATA;
 }
 /*- End of function --------------------------------------------------------*/
 
-SPAN_DECLARE(int) t4_tx_get_chunk(t4_tx_state_t *s, uint8_t buf[], int max_len)
+SPAN_DECLARE(int) t4_tx_get_bit(t4_tx_state_t *s)
+{
+    /* We only get bit by bit for T.4 1D and T.4 2-D. */
+    return t4_t6_encode_get_bit(&s->encoder.t4_t6);
+}
+/*- End of function --------------------------------------------------------*/
+
+SPAN_DECLARE(int) t4_tx_get(t4_tx_state_t *s, uint8_t buf[], size_t max_len)
 {
     switch (s->line_encoding)
     {
     case T4_COMPRESSION_ITU_T4_1D:
     case T4_COMPRESSION_ITU_T4_2D:
     case T4_COMPRESSION_ITU_T6:
-        return t4_t6_encode_get_chunk(&s->encoder.t4_t6, buf, max_len);
+        return t4_t6_encode_get(&s->encoder.t4_t6, buf, max_len);
     case T4_COMPRESSION_ITU_T42:
-        return t42_encode_get_chunk(&s->encoder.t42, buf, max_len);
+        return t42_encode_get(&s->encoder.t42, buf, max_len);
 #if defined(SPANDSP_SUPPORT_T43)
     case T4_COMPRESSION_ITU_T43:
-        return t43_encode_get_chunk(&s->encoder.t43, buf, max_len);
+        return t43_encode_get(&s->encoder.t43, buf, max_len);
 #endif
     case T4_COMPRESSION_ITU_T85:
     case T4_COMPRESSION_ITU_T85_L0:
-        return t85_encode_get_chunk(&s->encoder.t85, buf, max_len);
+        return t85_encode_get(&s->encoder.t85, buf, max_len);
     }
     return 0;
 }
@@ -995,7 +1108,7 @@ SPAN_DECLARE(int) t4_tx_start_page(t4_tx_state_t *s)
         break;
     }
     /* If there is a page header, create that first */
-    if (s->header_info  &&  s->header_info[0]  &&  make_header(s) == 0)
+    if (s->tiff.image_type == T4_IMAGE_TYPE_BILEVEL  &&  s->header_info  &&  s->header_info[0]  &&  make_header(s) == 0)
     {
         s->header_row = 0;
         set_row_read_handler(s, header_row_read_handler, (void *) s);
@@ -1051,6 +1164,8 @@ SPAN_DECLARE(t4_tx_state_t *) t4_tx_init(t4_tx_state_t *s, const char *file, int
     s->row_handler = tiff_row_read_handler;
     s->row_handler_user_data = (void *) s;
 
+    s->row_squashing_ratio = 1;
+
     if (file)
     {
         if (open_tiff_input_file(s, file) < 0)
@@ -1083,6 +1198,11 @@ SPAN_DECLARE(int) t4_tx_release(t4_tx_state_t *s)
     {
         free(s->header_text);
         s->header_text = NULL;
+    }
+    if (s->colour_map)
+    {
+        free(s->colour_map);
+        s->colour_map = NULL;
     }
     switch (s->line_encoding)
     {

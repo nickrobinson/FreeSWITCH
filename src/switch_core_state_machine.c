@@ -43,9 +43,19 @@ static void switch_core_standard_on_init(switch_core_session_t *session)
 static void switch_core_standard_on_hangup(switch_core_session_t *session)
 {
 	switch_caller_extension_t *extension;
+	int rec;
 
 	switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "%s Standard HANGUP, cause: %s\n",
 					  switch_channel_get_name(session->channel), switch_channel_cause2str(switch_channel_get_cause(session->channel)));
+
+
+	rec = switch_channel_test_flag(session->channel, CF_RECOVERING);
+	switch_channel_clear_flag(session->channel, CF_RECOVERING);
+
+	if (!rec) {
+		switch_core_recovery_untrack(session, SWITCH_TRUE);
+	}
+
 	
 	if (!switch_channel_test_flag(session->channel, CF_ZOMBIE_EXEC)) {
 		return;
@@ -69,6 +79,9 @@ static void switch_core_standard_on_hangup(switch_core_session_t *session)
 			return;
 		}
 	}
+
+
+
 
 
 }
@@ -329,6 +342,23 @@ void switch_core_state_machine_init(switch_memory_pool_t *pool)
 		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "(%s) State %s going to sleep\n", switch_channel_get_name(session->channel), __STATE_STR); \
 	} while (silly)
 
+
+static void check_presence(switch_core_session_t *session)
+{
+	switch_channel_state_t state = switch_channel_get_running_state(session->channel);
+
+	if (state == CS_ROUTING || state == CS_HANGUP) {
+		if (switch_channel_get_cause(session->channel) == SWITCH_CAUSE_LOSE_RACE) {
+			switch_channel_presence(session->channel, "unknown", "cancelled", NULL);
+			switch_channel_set_variable(session->channel, "presence_call_info", NULL);
+		} else {
+			switch_channel_presence(session->channel, "unknown", switch_channel_state_name(state), NULL);
+		}
+	}
+}
+
+
+
 SWITCH_DECLARE(void) switch_core_session_run(switch_core_session_t *session)
 {
 	switch_channel_state_t state = CS_NEW, midstate = CS_DESTROY, endstate;
@@ -336,7 +366,7 @@ SWITCH_DECLARE(void) switch_core_session_run(switch_core_session_t *session)
 	const switch_state_handler_table_t *driver_state_handler = NULL;
 	const switch_state_handler_table_t *application_state_handler = NULL;
 	int silly = 0;
-	uint32_t new_loops = 60000;
+	uint32_t new_loops = 500;
 
 	/*
 	   Life of the channel. you have channel and pool in your session
@@ -427,6 +457,13 @@ SWITCH_DECLARE(void) switch_core_session_run(switch_core_session_t *session)
 						switch_channel_event_set_data(session->channel, event);
 						switch_event_fire(&event);
 					}
+
+					if (switch_channel_direction(session->channel) == SWITCH_CALL_DIRECTION_OUTBOUND) {
+						if (switch_event_create(&event, SWITCH_EVENT_CHANNEL_ORIGINATE) == SWITCH_STATUS_SUCCESS) {
+							switch_channel_event_set_data(session->channel, event);
+							switch_event_fire(&event);
+						}
+					}
 				}
 				break;
 			case CS_ROUTING:	/* Look for a dialplan and find something to do */
@@ -459,6 +496,8 @@ SWITCH_DECLARE(void) switch_core_session_run(switch_core_session_t *session)
 				break;
 			}
 
+			check_presence(session);
+
 			if (midstate == CS_DESTROY) {
 				break;
 			}
@@ -469,23 +508,26 @@ SWITCH_DECLARE(void) switch_core_session_run(switch_core_session_t *session)
 
 		if (endstate == switch_channel_get_running_state(session->channel)) {
 			if (endstate == CS_NEW) {
-				switch_cond_next();
+				switch_yield(20000);
 				switch_ivr_parse_all_events(session);
 				if (!--new_loops) {
-					switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_CRIT, "%s Timeout waiting for next instruction in CS_NEW!\n",
-									  session->uuid_str);
-					switch_channel_hangup(session->channel, SWITCH_CAUSE_INVALID_CALL_REFERENCE);
+					switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_WARNING, "%s %s Abandoned\n",
+									  session->uuid_str, switch_core_session_get_name(session));
+					switch_channel_set_flag(session->channel, CF_NO_CDR);
+					switch_channel_hangup(session->channel, SWITCH_CAUSE_WRONG_CALL_STATE);
 				}
 			} else {
 				switch_ivr_parse_all_events(session);
 				switch_ivr_parse_all_events(session);
 
 				if (switch_channel_get_state(session->channel) == switch_channel_get_running_state(session->channel)) {
+					switch_channel_state_thread_lock(session->channel);
 					switch_channel_set_flag(session->channel, CF_THREAD_SLEEPING);
 					if (switch_channel_get_state(session->channel) == switch_channel_get_running_state(session->channel)) {
 						switch_thread_cond_wait(session->cond, session->mutex);
 					}
 					switch_channel_clear_flag(session->channel, CF_THREAD_SLEEPING);
+					switch_channel_state_thread_unlock(session->channel);
 				}
 
 				switch_ivr_parse_all_events(session);
@@ -649,6 +691,7 @@ SWITCH_DECLARE(void) switch_core_session_reporting_state(switch_core_session_t *
 	int silly = 0;
 	int index = 0;
 	const char *var = switch_channel_get_variable(session->channel, SWITCH_PROCESS_CDR_VARIABLE);
+	const char *skip_var = switch_channel_get_variable(session->channel, SWITCH_SKIP_CDR_CAUSES_VARIABLE);
 	const char *hook_var;
 	int use_session = 0;
 	switch_event_t *event;
@@ -681,6 +724,27 @@ SWITCH_DECLARE(void) switch_core_session_reporting_state(switch_core_session_t *
 			do_extra_handlers = 0;
 		}
 	}
+
+
+	if (!zstr(skip_var)) {
+		int x, ttl = 0;
+		char *list[128] = { 0 };
+		char *dup = switch_core_session_strdup(session, skip_var);
+
+		ttl = switch_split(dup, '|', list);
+
+		for(x = 0; x < ttl; x++) {
+			if (switch_channel_str2cause(list[x]) == cause) {
+				do_extra_handlers = 0;
+				break;
+			}
+		}
+	}
+
+	if (switch_channel_test_flag(session->channel, CF_NO_CDR)) {
+		do_extra_handlers = 0;
+	}
+
 
 	STATE_MACRO(reporting, "REPORTING");
 

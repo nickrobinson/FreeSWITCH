@@ -234,7 +234,8 @@ static inline uint32_t switch_known_bitrate(switch_payload_t payload)
 }
 
 SWITCH_DECLARE(switch_size_t) switch_fd_read_line(int fd, char *buf, switch_size_t len);
-
+SWITCH_DECLARE(switch_size_t) switch_fd_read_dline(int fd, char **buf, switch_size_t *len);
+SWITCH_DECLARE(switch_size_t) switch_fp_read_dline(FILE *fd, char **buf, switch_size_t *len);
 
 SWITCH_DECLARE(switch_status_t) switch_frame_alloc(switch_frame_t **frame, switch_size_t size);
 SWITCH_DECLARE(switch_status_t) switch_frame_dup(switch_frame_t *orig, switch_frame_t **clone);
@@ -836,6 +837,16 @@ SWITCH_DECLARE(char *) switch_format_number(const char *num);
 
 SWITCH_DECLARE(unsigned int) switch_atoui(const char *nptr);
 SWITCH_DECLARE(unsigned long) switch_atoul(const char *nptr);
+
+/**
+ * Portable version of strerror_r(), work around for the incompatible
+ * return type of GNU and XSI variants.
+ * \param[in]	errnum	Error number
+ * \param[both]	buf	Buffer for error message
+ * \param[in]	buflen	Size of message buffer
+ * \return	Pointer to message buffer, returning error message or "Unknown error xxx" if none found
+ */
+SWITCH_DECLARE(char *) switch_strerror_r(int errnum, char *buf, switch_size_t buflen);
 
 SWITCH_END_EXTERN_C
 #endif

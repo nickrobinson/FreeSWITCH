@@ -1245,6 +1245,7 @@ int nua_invite_client_ack(nua_client_request_t *cr, tagi_t const *tags)
   int status = 200;
   char const *phrase = "OK", *reason = NULL;
   char const *invite_branch;
+  char const *pl_s = NULL;
 
   assert(cr->cr_orq);
   assert(cr->cr_method == sip_method_invite);
@@ -1255,6 +1256,11 @@ int nua_invite_client_ack(nua_client_request_t *cr, tagi_t const *tags)
     /* XXX - fix nua_dialog_usage_remove_at() instead! */
     goto error;
   }
+
+  tl_gets(tags,
+		  SIPTAG_PAYLOAD_STR_REF(pl_s),
+		  TAG_END());
+  
 
   assert(ds->ds_leg);
 
@@ -1305,7 +1311,7 @@ int nua_invite_client_ack(nua_client_request_t *cr, tagi_t const *tags)
     while (sip->sip_supported)
       sip_header_remove(msg, sip, (sip_header_t*)sip->sip_supported);
 
-    if (ss == NULL || ss->ss_state > nua_callstate_ready)
+    if (ss == NULL || ss->ss_state > nua_callstate_ready || pl_s)
       ;
     else if (cr->cr_offer_recv && !cr->cr_answer_sent) {
       if (nh->nh_soa == NULL) {
@@ -2147,7 +2153,7 @@ nua_session_server_init(nua_server_request_t *sr)
 		if (request->sip_multipart) {
 			mp = request->sip_multipart;
 		} else {
-			mp = msg_multipart_parse(msg_home(msg),
+			mp = msg_multipart_parse(nua_handle_home(nh),
 									 request->sip_content_type,
 									 (sip_payload_t *)request->sip_payload);
 			request->sip_multipart = mp;
@@ -2162,13 +2168,13 @@ nua_session_server_init(nua_server_request_t *sr)
 					mpp->mp_payload && mpp->mp_payload->pl_data && 
 					su_casenmatch(mpp->mp_content_type->c_type, "application/sdp", 15)) {
 
-					request->sip_content_type = msg_content_type_dup(msg_home(msg), mpp->mp_content_type);
+					request->sip_content_type = msg_content_type_dup(nua_handle_home(nh), mpp->mp_content_type);
 					
 					if (request->sip_content_length) {
 						request->sip_content_length->l_length = mpp->mp_payload->pl_len;
 					}
 					
-					request->sip_payload->pl_data = su_strdup(msg_home(msg), mpp->mp_payload->pl_data);
+					request->sip_payload->pl_data = su_strdup(nua_handle_home(nh), mpp->mp_payload->pl_data);
 					request->sip_payload->pl_len = mpp->mp_payload->pl_len;
 
 					sdp++;
@@ -3039,11 +3045,11 @@ nh_referral_check(nua_handle_t *nh, tagi_t const *tags)
     ref->ref_event = sip_event_dup(nh->nh_home, event);
 
   if (!nh_validate(nh->nh_nua, ref_handle)) {
-    SU_DEBUG_3(("nua: invalid NOTIFY_REFER handle\n"));
+    SU_DEBUG_3(("nua: invalid NOTIFY_REFER handle\n" VA_NONE));
     return -1;
   }
   else if (!ref->ref_event) {
-    SU_DEBUG_3(("nua: NOTIFY event missing\n"));
+    SU_DEBUG_3(("nua: NOTIFY event missing\n" VA_NONE));
     return -1;
   }
 

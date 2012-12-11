@@ -122,8 +122,8 @@ switch_io_routines_t crtp_io_routines = {
 	/*state_change*/ NULL,
 	/*read_video_frame*/ NULL,
 	/*write_video_frame*/ NULL,
-	/*state_run*/ NULL,
-	/* resurrect_session*/ NULL
+	/*state_run*/ NULL
+
 
 };
 
@@ -542,7 +542,7 @@ fail:
     if (session) {
         switch_core_session_destroy(&session);
     }
-    return SWITCH_CAUSE_DESTINATION_OUT_OF_ORDER;
+    return SWITCH_STATUS_FALSE;
 
 }
 

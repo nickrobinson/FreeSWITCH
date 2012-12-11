@@ -253,12 +253,8 @@ static switch_status_t my_on_reporting(switch_core_session_t *session)
 				}
 			} else {
 				char ebuf[512] = { 0 };
-#ifdef WIN32
-				strerror_s(ebuf, sizeof(ebuf), errno);
-#else
-				strerror_r(errno, ebuf, sizeof(ebuf));
-#endif
-				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Error writing [%s][%s]\n", path, ebuf);
+				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Error writing [%s][%s]\n",
+						path, switch_strerror_r(errno, ebuf, sizeof(ebuf)));
 			}
 			switch_safe_free(path);
 		}
@@ -412,12 +408,8 @@ static switch_status_t my_on_reporting(switch_core_session_t *session)
 					break;
 				} else {
 					char ebuf[512] = { 0 };
-#ifdef WIN32
-					strerror_s(ebuf, sizeof(ebuf), errno);
-#else
-					strerror_r(errno, ebuf, sizeof(ebuf));
-#endif
-					switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Can't open %s! [%s]\n", path, ebuf);
+					switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Can't open %s! [%s]\n",
+							path, switch_strerror_r(errno, ebuf, sizeof(ebuf)));
 
 				}
 
@@ -568,15 +560,15 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_json_cdr_load)
 			} else if (!strcasecmp(var, "enable-cacert-check") && switch_true(val)) {
 				globals.enable_cacert_check = 1;
 			} else if (!strcasecmp(var, "ssl-cert-path")) {
-				globals.ssl_cert_file = val;
+				globals.ssl_cert_file = switch_core_strdup(globals.pool, val);
 			} else if (!strcasecmp(var, "ssl-key-path")) {
-				globals.ssl_key_file = val;
+				globals.ssl_key_file = switch_core_strdup(globals.pool, val);
 			} else if (!strcasecmp(var, "ssl-key-password")) {
-				globals.ssl_key_password = val;
+				globals.ssl_key_password = switch_core_strdup(globals.pool, val);
 			} else if (!strcasecmp(var, "ssl-version")) {
-				globals.ssl_version = val;
+				globals.ssl_version = switch_core_strdup(globals.pool, val);
 			} else if (!strcasecmp(var, "ssl-cacert-file")) {
-				globals.ssl_cacert_file = val;
+				globals.ssl_cacert_file = switch_core_strdup(globals.pool, val);
 			} else if (!strcasecmp(var, "enable-ssl-verifyhost") && switch_true(val)) {
 				globals.enable_ssl_verifyhost = 1;
 			} else if (!strcasecmp(var, "auth-scheme")) {

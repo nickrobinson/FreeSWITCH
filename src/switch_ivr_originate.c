@@ -191,6 +191,7 @@ static void *SWITCH_THREAD_FUNC collect_thread_run(switch_thread_t *thread, void
 
 		if (switch_channel_up_nosig(channel)) {
 			switch_channel_set_flag(channel, CF_WINNER);
+			switch_channel_set_variable(channel, "group_dial_status", "winner");
 		}
 		goto wbreak;
 	}
@@ -225,6 +226,7 @@ static void *SWITCH_THREAD_FUNC collect_thread_run(switch_thread_t *thread, void
 		
 		if (!strcmp(collect->key, buf)) {
 			switch_channel_set_flag(channel, CF_WINNER);
+			switch_channel_set_variable(channel, "group_dial_status", "winner");
 			goto wbreak;
 		} else if (collect->error_file) {
 			switch_ivr_play_file(collect->session, NULL, collect->error_file, NULL);
@@ -421,7 +423,7 @@ static void inherit_codec(switch_channel_t *caller_channel, switch_core_session_
 	}
 }
 
-static uint8_t check_channel_status(originate_global_t *oglobals, originate_status_t *originate_status, uint32_t len)
+static uint8_t check_channel_status(originate_global_t *oglobals, originate_status_t *originate_status, uint32_t len, switch_call_cause_t *force_reason)
 {
 
 	uint32_t i;
@@ -694,6 +696,20 @@ static uint8_t check_channel_status(originate_global_t *oglobals, originate_stat
 			}
 		}
 
+		if (switch_channel_test_flag(originate_status[i].peer_channel, CF_EARLY_OK)) {
+			if (!oglobals->early_ok) {
+				oglobals->early_ok = 1;
+			}
+			switch_channel_clear_flag(originate_status[i].peer_channel, CF_EARLY_OK);
+		}
+
+		if (caller_channel && switch_channel_test_flag(caller_channel, CF_EARLY_OK)) {
+			if (!oglobals->early_ok) {
+				oglobals->early_ok = 1;
+			}
+			switch_channel_clear_flag(caller_channel, CF_EARLY_OK);
+		}
+
 		state = switch_channel_get_state(originate_status[i].peer_channel);
 		if (state >= CS_HANGUP || state == CS_RESET || switch_channel_test_flag(originate_status[i].peer_channel, CF_TRANSFER) ||
 			switch_channel_test_flag(originate_status[i].peer_channel, CF_REDIRECT) ||
@@ -763,6 +779,16 @@ static uint8_t check_channel_status(originate_global_t *oglobals, originate_stat
 	}
 
   end:
+
+	if (rval == 0 && pickups) {
+		for (i = 0; i < len; i++) {
+			if (originate_status[i].peer_channel && switch_channel_test_flag(originate_status[i].peer_channel, CF_PICKUP) && 
+				switch_channel_up(originate_status[i].peer_channel)) {
+				switch_channel_hangup(originate_status[i].peer_channel, SWITCH_CAUSE_NO_PICKUP);
+			}
+		}
+	}
+
 
 	if (pindex > -1 && caller_channel && switch_channel_ready(caller_channel) && !switch_channel_media_ready(caller_channel) && 
 		switch_channel_media_ready(originate_status[pindex].peer_channel)) {
@@ -1190,24 +1216,32 @@ static switch_status_t setup_ringback(originate_global_t *oglobals, originate_st
 		}
 
 		if (!ringback->asis) {
+			switch_codec_implementation_t peer_read_impl = { 0 };
+
 			if (switch_test_flag(read_codec, SWITCH_CODEC_FLAG_PASSTHROUGH)) {
 				switch_log_printf(SWITCH_CHANNEL_CHANNEL_LOG(caller_channel), SWITCH_LOG_WARNING, "%s Ringback not supported in passthrough codec mode.\n",
 								  switch_channel_get_name(caller_channel));
 				switch_goto_status(SWITCH_STATUS_GENERR, end);
 			}
 
+			if (oglobals->bridge_early_media > -1 && zstr(ringback_data) && len == 1 && originate_status[0].peer_session) {
+				switch_core_session_get_read_impl(originate_status[0].peer_session, &peer_read_impl);
+			} else {
+				switch_core_session_get_read_impl(oglobals->session, &peer_read_impl);
+			}
+
 			if (switch_core_codec_init(write_codec,
 									   "L16",
 									   NULL,
-									   read_codec->implementation->actual_samples_per_second,
-									   read_codec->implementation->microseconds_per_packet / 1000,
+									   peer_read_impl.actual_samples_per_second,
+									   peer_read_impl.microseconds_per_packet / 1000,
 									   1, SWITCH_CODEC_FLAG_ENCODE | SWITCH_CODEC_FLAG_DECODE, NULL,
 									   switch_core_session_get_pool(oglobals->session)) == SWITCH_STATUS_SUCCESS) {
 
 
 				switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(oglobals->session), SWITCH_LOG_DEBUG,
 								  "Raw Codec Activation Success L16@%uhz 1 channel %dms\n",
-								  read_codec->implementation->actual_samples_per_second, read_codec->implementation->microseconds_per_packet / 1000);
+								  peer_read_impl.actual_samples_per_second, peer_read_impl.microseconds_per_packet / 1000);
 				write_frame->codec = write_codec;
 				write_frame->datalen = read_codec->implementation->decoded_bytes_per_packet;
 				write_frame->samples = write_frame->datalen / 2;
@@ -1337,7 +1371,10 @@ static void *SWITCH_THREAD_FUNC enterprise_originate_thread(switch_thread_t *thr
 
 	if (handle->done != 2) {
 		if (handle->status == SWITCH_STATUS_SUCCESS) {
-			switch_channel_hangup(switch_core_session_get_channel(handle->bleg), SWITCH_CAUSE_LOSE_RACE);
+			switch_channel_t *channel = switch_core_session_get_channel(handle->bleg);
+
+			switch_channel_set_variable(channel, "group_dial_status", "loser");
+			switch_channel_hangup(channel, SWITCH_CAUSE_LOSE_RACE);
 			switch_core_session_rwunlock(handle->bleg);
 		}
 	}
@@ -1405,11 +1442,15 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_enterprise_originate(switch_core_sess
 	struct ent_originate_ringback rb_data = { 0 };
 	const char *ringback_data = NULL;
 	switch_event_t *var_event = NULL;
+	int getcause = 1;
+
+	*cause = SWITCH_CAUSE_SUCCESS;
 
 	switch_core_new_memory_pool(&pool);
 
 	if (zstr(bridgeto)) {
 		*cause = SWITCH_CAUSE_DESTINATION_OUT_OF_ORDER;
+		getcause = 0;
 		switch_goto_status(SWITCH_STATUS_FALSE, end);
 	}
 
@@ -1482,6 +1523,7 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_enterprise_originate(switch_core_sess
 
 	if (!(x_argc = switch_separate_string_string(data, SWITCH_ENT_ORIGINATE_DELIM, x_argv, MAX_PEERS))) {
 		*cause = SWITCH_CAUSE_DESTINATION_OUT_OF_ORDER;
+		getcause = 0;
 		switch_goto_status(SWITCH_STATUS_FALSE, end);
 	}
 
@@ -1571,6 +1613,7 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_enterprise_originate(switch_core_sess
 
 	if (hp) {
 		*cause = hp->cause;
+		getcause = 0;
 		status = hp->status;
 		*bleg = hp->bleg;
 		switch_mutex_unlock(hp->mutex);
@@ -1595,10 +1638,15 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_enterprise_originate(switch_core_sess
 			continue;
 		}
 		switch_mutex_unlock(handles[i].mutex);
+
+		if (getcause && *cause != handles[i].cause && handles[i].cause != SWITCH_CAUSE_LOSE_RACE && handles[i].cause != SWITCH_CAUSE_NO_PICKUP) {
+			*cause = handles[i].cause;
+			getcause++;
+		}
+
 		switch_thread_join(&tstatus, handles[i].thread);
 		switch_event_destroy(&handles[i].ovars);
 	}
-
 
 	if (channel && rb_data.thread) {
 		switch_channel_set_flag(channel, CF_NOT_READY);
@@ -1608,6 +1656,10 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_enterprise_originate(switch_core_sess
 
 
   end:
+
+	if (getcause == 1 && *cause == SWITCH_CAUSE_SUCCESS) {
+		*cause = SWITCH_CAUSE_NO_ANSWER;
+	}
 
 	if (var_event && var_event != ovars) {
 		switch_event_destroy(&var_event);
@@ -1801,6 +1853,12 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_originate(switch_core_session_t *sess
 	int read_packet = 0;
 	int check_reject = 1;
 	switch_codec_implementation_t read_impl = { 0 };
+
+	if (session) {
+		switch_channel_set_variable(switch_core_session_get_channel(session), "originated_legs", NULL);
+		switch_channel_set_variable(switch_core_session_get_channel(session), "originate_causes", NULL);
+	}
+	
 	
 	if (strstr(bridgeto, SWITCH_ENT_ORIGINATE_DELIM)) {
 		return switch_ivr_enterprise_originate(session, bleg, cause, bridgeto, timelimit_sec, table, cid_name_override, cid_num_override,
@@ -1829,6 +1887,9 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_originate(switch_core_session_t *sess
 		caller_channel = switch_core_session_get_channel(session);
 		switch_channel_set_flag(caller_channel, CF_ORIGINATOR);
 		oglobals.session = session;
+
+		switch_channel_execute_on(caller_channel, SWITCH_CHANNEL_EXECUTE_ON_PRE_ORIGINATE_VARIABLE);
+		switch_channel_api_on(caller_channel, SWITCH_CHANNEL_API_ON_PRE_ORIGINATE_VARIABLE);
 
 		switch_core_session_get_read_impl(session, &read_impl);
 
@@ -2153,6 +2214,9 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_originate(switch_core_session_t *sess
 		if (switch_true(var_val)) {
 			oglobals.early_ok = 0;
 			oglobals.ignore_early_media = 1;
+		} else if (!strcmp(var_val, "consume")) {
+			oglobals.early_ok = 0;
+			oglobals.ignore_early_media = 4;
 		} else if (!strcmp(var_val, "ring_ready")) {
 			oglobals.early_ok = 0;
 			oglobals.ignore_early_media = 2;
@@ -2359,7 +2423,7 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_originate(switch_core_session_t *sess
 
 			for (i = 0; i < and_argc; i++) {
 				const char *current_variable;
-				switch_event_t *local_var_event = NULL, *originate_var_event = NULL, *event = NULL;
+				switch_event_t *local_var_event = NULL, *originate_var_event = NULL;
 
 				end = NULL;
 				
@@ -2449,7 +2513,7 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_originate(switch_core_session_t *sess
 							cid_name_override = SWITCH_DEFAULT_CLID_NAME;
 						}
 						if (!cid_num_override) {
-							cid_num_override = "0000000000";
+							cid_num_override = SWITCH_DEFAULT_CLID_NUMBER;
 						}
 
 						new_profile = switch_caller_profile_new(oglobals.pool,
@@ -2625,11 +2689,6 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_originate(switch_core_session_t *sess
 					}
 				}
 
-				switch_event_create(&event, SWITCH_EVENT_CHANNEL_ORIGINATE);
-				switch_assert(event);
-				switch_channel_event_set_data(originate_status[i].peer_channel, event);
-				switch_event_fire(&event);
-
 				if (originate_status[i].peer_channel) {
 					const char *vvar;
 
@@ -2686,7 +2745,18 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_originate(switch_core_session_t *sess
 					}
 
 					if (session) {
+						switch_channel_t *channel = switch_core_session_get_channel(session);
+						char *val = 
+							switch_core_session_sprintf(session, "%s;%s;%s", 
+														switch_core_session_get_uuid(originate_status[i].peer_session),
+														switch_str_nil(switch_channel_get_variable(originate_status[i].peer_channel, "callee_id_name")),
+														switch_str_nil(switch_channel_get_variable(originate_status[i].peer_channel, "callee_id_number")));
+						
+
 						switch_channel_set_variable(originate_status[i].peer_channel, "originating_leg_uuid", switch_core_session_get_uuid(session));
+						
+						switch_channel_add_variable_var_check(channel, "originated_legs", val, SWITCH_FALSE, SWITCH_STACK_PUSH);
+															  
 					}
 
 					switch_channel_execute_on(originate_status[i].peer_channel, SWITCH_CHANNEL_EXECUTE_ON_ORIGINATE_VARIABLE);
@@ -2697,7 +2767,7 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_originate(switch_core_session_t *sess
 					switch_channel_add_state_handler(originate_status[i].peer_channel, table);
 				}
 				
-				if (oglobals.monitor_early_media_ring || oglobals.monitor_early_media_fail) {
+				if (oglobals.monitor_early_media_ring || oglobals.monitor_early_media_fail || oglobals.ignore_early_media == 4) {
 					switch_channel_set_flag(originate_status[i].peer_channel, CF_CONSUME_ON_ORIGINATE);
 				}
 
@@ -2805,7 +2875,7 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_originate(switch_core_session_t *sess
 			}
 
 			while ((!caller_channel || switch_channel_ready(caller_channel) || switch_channel_test_flag(caller_channel, CF_XFER_ZOMBIE)) &&
-				   check_channel_status(&oglobals, originate_status, and_argc)) {
+				   check_channel_status(&oglobals, originate_status, and_argc, &force_reason)) {
 				time_t elapsed = switch_epoch_time_now(NULL) - start;
 				
 				read_packet = 0;
@@ -3045,7 +3115,7 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_originate(switch_core_session_t *sess
 			do_continue:
 
 				if (!read_packet) {
-					switch_cond_next();
+					switch_yield(20000);
 				}
 			}
 
@@ -3273,6 +3343,9 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_originate(switch_core_session_t *sess
 							switch_ivr_uuid_bridge(holding, switch_core_session_get_uuid(originate_status[i].peer_session));
 							holding = NULL;
 						} else {
+							if (force_reason == SWITCH_CAUSE_LOSE_RACE || reason == SWITCH_CAUSE_LOSE_RACE) {
+								switch_channel_set_variable(originate_status[i].peer_channel, "group_dial_status", "loser");
+							}
 							switch_channel_hangup(originate_status[i].peer_channel, force_reason ? force_reason : reason);
 						}
 					}
@@ -3300,13 +3373,13 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_originate(switch_core_session_t *sess
 					if (switch_channel_test_flag(caller_channel, CF_PROXY_MODE)) {
 						status = SWITCH_STATUS_SUCCESS;
 					} else {
-					status = switch_channel_answer(caller_channel);
+						status = switch_channel_answer(caller_channel);
 					}
 				} else if (switch_channel_test_flag(peer_channel, CF_EARLY_MEDIA)) {
 					if (switch_channel_test_flag(caller_channel, CF_PROXY_MODE)) {
 						status = SWITCH_STATUS_SUCCESS;
 					} else {
-					status = switch_channel_pre_answer(caller_channel);
+						status = switch_channel_pre_answer(caller_channel);
 					}
 				} else {
 					status = SWITCH_STATUS_SUCCESS;
@@ -3515,9 +3588,18 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_originate(switch_core_session_t *sess
 
 			for (i = 0; i < and_argc; i++) {
 				switch_channel_state_t state;
+				char *val;							
 
 				if (!originate_status[i].peer_channel) {
 					continue;
+				}
+				
+				if (session) {
+					val = switch_core_session_sprintf(originate_status[i].peer_session, "%s;%s", 
+													  switch_core_session_get_uuid(originate_status[i].peer_session), 
+													  switch_channel_cause2str(switch_channel_get_cause(originate_status[i].peer_channel)));
+					
+					switch_channel_add_variable_var_check(switch_core_session_get_channel(session), "originate_causes", val, SWITCH_FALSE, SWITCH_STACK_PUSH);
 				}
 
 				if (status == SWITCH_STATUS_SUCCESS) {
@@ -3648,6 +3730,10 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_originate(switch_core_session_t *sess
 	switch_safe_free(fail_on_single_reject_var);
 
 	if (caller_channel) {
+
+		switch_channel_execute_on(caller_channel, SWITCH_CHANNEL_EXECUTE_ON_POST_ORIGINATE_VARIABLE);
+		switch_channel_api_on(caller_channel, SWITCH_CHANNEL_API_ON_POST_ORIGINATE_VARIABLE);
+
 		switch_channel_clear_flag(caller_channel, CF_ORIGINATOR);
 		switch_channel_clear_flag(caller_channel, CF_XFER_ZOMBIE);
 	}
