@@ -6034,6 +6034,7 @@ static void sofia_handle_sip_i_state(switch_core_session_t *session, int status,
 								switch_yield(250000);
 								launch_media_on_hold(session);
 
+								switch_core_session_rwunlock(other_session);
 								goto done;
 							}
 						}

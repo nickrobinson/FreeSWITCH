@@ -1884,7 +1884,7 @@ static int sofia_dialog_probe_callback(void *pArg, int argc, char **argv, char *
 {
 	struct rfc4235_helper *h = (struct rfc4235_helper *) pArg;
 
-	char *proto = argv[0];
+	//	char *proto = argv[0];
 	char *user = argv[1];
 	char *host = argv[2];
 	char *uuid = argv[3];
@@ -1892,30 +1892,30 @@ static int sofia_dialog_probe_callback(void *pArg, int argc, char **argv, char *
 	char *state = argv[5];
 	char *direction = argv[6];
 	char *to_user = argv[7];
-	char *to_host = argv[8];
+	//	char *to_host = argv[8];
 	char *from_user = argv[9];
 	//    char *from_host = argv[10];
-	char *contact = switch_str_nil(argv[11]);
+	//	char *contact = switch_str_nil(argv[11]);
 	char *contact_user = switch_str_nil(argv[12]);
-	char *contact_host = switch_str_nil(argv[13]);
+	//	char *contact_host = switch_str_nil(argv[13]);
 	char *to_tag = switch_str_nil(argv[14]);
 	char *from_tag = switch_str_nil(argv[15]);
-	char *orig_proto = switch_str_nil(argv[16]);
+	//	char *orig_proto = switch_str_nil(argv[16]);
 
-	const char *event_status = "";
+	//	const char *event_status = "";
 	char *data = NULL, *tmp;
 	char key[256] = "";
-	char *local_user;
-	char *local_host;
-	char *remote_user;
-	char *remote_host;
-	char *remote_uri;
-	char *local_user_param = "";
-	char remote_display_buf[512];
+	//char *local_user;
+	//	char *local_host;
+	//	char *remote_user;
+	//	char *remote_host;
+	//	char *remote_uri;
+	//	char *local_user_param = "";
+	//	char remote_display_buf[512];
 	char *buf_to_free = NULL;
-	int bInternal = 0;
+	//	int bInternal = 0;
 	int i;
-	int skip_proto = 0;
+	//	int skip_proto = 0;
 
 	if (mod_sofia_globals.debug_presence > 1) {
 		for (i = 0; i < argc; i++) {
@@ -1935,7 +1935,7 @@ static int sofia_dialog_probe_callback(void *pArg, int argc, char **argv, char *
 		// because it is not going through the B2BUA
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "sofia_dialog_probe_callback: endpt is internal\n");
 		direction = !strcasecmp(direction, "outbound") ? "inbound" : "outbound";
-		bInternal = 1;
+		//		bInternal = 1;
 	}
 
 	if (!strcasecmp(direction, "outbound")) {
@@ -1945,83 +1945,83 @@ static int sofia_dialog_probe_callback(void *pArg, int argc, char **argv, char *
 		direction = "initiator";
 	}
 
-	if (!zstr(orig_proto) && !strcmp(orig_proto, SOFIA_CHAT_PROTO)) {
-		skip_proto = 1;
-	}
+	/* if (!zstr(orig_proto) && !strcmp(orig_proto, SOFIA_CHAT_PROTO)) { */
+	/* 	skip_proto = 1; */
+	/* } */
 
-	local_host = to_host;
-	if (proto && !strcasecmp(proto, "queue")) {
-		local_user = to_user;
-		local_user_param = switch_mprintf(";proto=%s", proto);
-		event_status = "hold";
-		if (skip_proto) {
-			buf_to_free = switch_mprintf("sip:%s", to_user);
-		} else {
-			buf_to_free = switch_mprintf("sip:queue+%s", to_user);
-		}
-		remote_uri = buf_to_free;
-		strcpy(remote_display_buf, "queue");
-		remote_user = to_user;
-		remote_host = local_host;
-	}
-	else if (proto && !strcasecmp(proto, "park")) {
-		local_user = to_user;
-		local_user_param = switch_mprintf(";proto=%s", proto);
-		event_status = "hold";
-		if (skip_proto) {
-			buf_to_free = switch_mprintf("sip:%s", to_user);
-		} else {
-			buf_to_free = switch_mprintf("sip:park+%s", to_user);
-		}
-		remote_uri = buf_to_free;
-		strcpy(remote_display_buf, "park");
-		remote_user = to_user;
-		remote_host = local_host;
-	}
-	else if (proto && !strcasecmp(proto, "pickup")) {
-		local_user = to_user;
-		local_user_param = switch_mprintf(";proto=%s", proto);
-		event_status = "hold";
-		if (skip_proto) {
-			buf_to_free = switch_mprintf("sip:%s", to_user);
-		} else {
-			buf_to_free = switch_mprintf("sip:pickup+%s", to_user);
-		}
-		remote_uri = buf_to_free;
-		strcpy(remote_display_buf, "pickup");
-		remote_user = to_user;
-		remote_host = local_host;
-	}
-	else if (proto && !strcasecmp(proto, "conf")) {
-		local_user = to_user;
-		local_user_param = switch_mprintf(";proto=%s", proto);
-		if (skip_proto) { 
-			buf_to_free = switch_mprintf("sip:%s@%s", to_user, host);
-		} else {
-			buf_to_free = switch_mprintf("sip:conf+%s@%s", to_user, host);
-		}
-		remote_uri = buf_to_free;
-		strcpy(remote_display_buf, "conference");
-		remote_user = to_user;
-		remote_host = local_host;
-	}
-	else if (bInternal) {
-		local_user = to_user;
-		get_display_name_from_contact(contact, remote_display_buf);
-		buf_to_free = sofia_glue_strip_uri(contact);
-		remote_uri = buf_to_free;
-		remote_user = contact_user;
-		remote_host = contact_host;
-	} else {
-		local_user = from_user;
-		buf_to_free = switch_mprintf("**%s@%s", from_user, local_host);
-		remote_uri = buf_to_free;
-		strcpy(remote_display_buf, to_user);
-		remote_user = to_user;
-		remote_host = local_host;
-	}
+	/* local_host = to_host;  */
+	/* if (proto && !strcasecmp(proto, "queue")) { */
+	/* 	local_user = to_user; */
+	/* 	local_user_param = switch_mprintf(";proto=%s", proto); */
+	/* 	event_status = "hold"; */
+	/* 	if (skip_proto) { */
+	/* 		buf_to_free = switch_mprintf("sip:%s", to_user); */
+	/* 	} else { */
+	/* 		buf_to_free = switch_mprintf("sip:queue+%s", to_user); */
+	/* 	} */
+	/* 	remote_uri = buf_to_free; */
+	/* 	strcpy(remote_display_buf, "queue"); */
+	/* 	remote_user = to_user; */
+	/* 	remote_host = local_host; */
+	/* } */
+	/* else if (proto && !strcasecmp(proto, "park")) { */
+	/* 	local_user = to_user; */
+	/* 	local_user_param = switch_mprintf(";proto=%s", proto); */
+	/* 	event_status = "hold"; */
+	/* 	if (skip_proto) { */
+	/* 		buf_to_free = switch_mprintf("sip:%s", to_user); */
+	/* 	} else { */
+	/* 		buf_to_free = switch_mprintf("sip:park+%s", to_user); */
+	/* 	} */
+	/* 	remote_uri = buf_to_free; */
+	/* 	strcpy(remote_display_buf, "park"); */
+	/* 	remote_user = to_user; */
+	/* 	remote_host = local_host; */
+	/* } */
+	/* else if (proto && !strcasecmp(proto, "pickup")) { */
+	/* 	local_user = to_user; */
+	/* 	local_user_param = switch_mprintf(";proto=%s", proto); */
+	/* 	event_status = "hold"; */
+	/* 	if (skip_proto) { */
+	/* 		buf_to_free = switch_mprintf("sip:%s", to_user); */
+	/* 	} else { */
+	/* 		buf_to_free = switch_mprintf("sip:pickup+%s", to_user); */
+	/* 	} */
+	/* 	remote_uri = buf_to_free; */
+	/* 	strcpy(remote_display_buf, "pickup"); */
+	/* 	remote_user = to_user; */
+	/* 	remote_host = local_host; */
+	/* } */
+	/* else if (proto && !strcasecmp(proto, "conf")) { */
+	/* 	local_user = to_user; */
+	/* 	local_user_param = switch_mprintf(";proto=%s", proto); */
+	/* 	if (skip_proto) {  */
+	/* 		buf_to_free = switch_mprintf("sip:%s@%s", to_user, host); */
+	/* 	} else { */
+	/* 		buf_to_free = switch_mprintf("sip:conf+%s@%s", to_user, host); */
+	/* 	} */
+	/* 	remote_uri = buf_to_free; */
+	/* 	strcpy(remote_display_buf, "conference"); */
+	/* 	remote_user = to_user; */
+	/* 	remote_host = local_host; */
+	/* } */
+	/* else if (bInternal) { */
+	/* 	local_user = to_user; */
+	/* 	get_display_name_from_contact(contact, remote_display_buf); */
+	/* 	buf_to_free = sofia_glue_strip_uri(contact); */
+	/* 	remote_uri = buf_to_free; */
+	/* 	remote_user = contact_user; */
+	/* 	remote_host = contact_host; */
+	/* } else { */
+	/* 	local_user = from_user; */
+	/* 	buf_to_free = switch_mprintf("**%s@%s", from_user, local_host); */
+	/* 	remote_uri = buf_to_free; */
+	/* 	strcpy(remote_display_buf, to_user); */
+	/* 	remote_user = to_user; */
+	/* 	remote_host = local_host; */
+	/* } */
 
-	switch_snprintf(key, sizeof(key), "%s%s", user, host);
+ 	switch_snprintf(key, sizeof(key), "%s%s", user, host);
 	data = switch_core_hash_find(h->hash, key);
 	if (!data) {
 		data = "";
@@ -3724,7 +3724,6 @@ void sofia_presence_handle_sip_i_subscribe(int status,
 				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_NOTICE, "%s SUBSCRIBE %s@%s %s@%s\n%s\n",
 								  profile->name, from_user, from_host, to_user, to_host, sql);
 			}
-
 
 			sofia_glue_execute_sql_now(profile, &sql, SWITCH_TRUE);
 			sstr = switch_mprintf("active;expires=%ld", exp_delta);

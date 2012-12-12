@@ -36,7 +36,6 @@
 #include <switch_event.h>
 #include "tpl.h"
 
-
 //#define SWITCH_EVENT_RECYCLE
 #define DISPATCH_QUEUE_LEN 10000
 //#define DEBUG_DISPATCH_QUEUES
