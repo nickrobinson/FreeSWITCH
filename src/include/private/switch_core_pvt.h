@@ -98,7 +98,8 @@ typedef enum {
 	SSF_READ_TRANSCODE = (1 << 5),
 	SSF_WRITE_TRANSCODE = (1 << 6),
 	SSF_READ_CODEC_RESET = (1 << 7),
-	SSF_WRITE_CODEC_RESET = (1 << 8)
+	SSF_WRITE_CODEC_RESET = (1 << 8),
+	SSF_DESTROYABLE = (1 << 9)
 } switch_session_flag_t;
 
 
@@ -246,8 +247,6 @@ struct switch_runtime {
 	char dummy_data[5];
 	switch_bool_t colorize_console;
 	char *odbc_dsn;
-	char *odbc_user;
-	char *odbc_pass;
 	char *dbname;
 	uint32_t debug_level;
 	uint32_t runlevel;
@@ -257,8 +256,6 @@ struct switch_runtime {
 	switch_profile_timer_t *profile_timer;
 	double profile_time;
 	double min_idle_time;
-	int sql_buffer_len;
-	int max_sql_buffer_len;
 	switch_dbtype_t odbc_dbtype;
 	char hostname[256];
 	char *switchname;
@@ -282,6 +279,13 @@ struct switch_session_manager {
 	uint32_t session_count;
 	uint32_t session_limit;
 	switch_size_t session_id;
+	switch_queue_t *thread_queue;
+	switch_thread_t *manager_thread;
+	switch_mutex_t *mutex;
+	int ready;
+	int running;
+	int busy;
+	int popping;
 };
 
 extern struct switch_session_manager session_manager;

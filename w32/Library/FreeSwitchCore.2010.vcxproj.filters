@@ -160,6 +160,9 @@
     <ClCompile Include="..\..\src\switch_odbc.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\src\switch_pgsql.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\src\switch_pcm.c">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -200,6 +203,12 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="..\..\src\switch_curl.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\libs\libtpl-1.5\src\tpl.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\libs\libtpl-1.5\src\win\mmap.c">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -279,6 +288,9 @@
     <ClInclude Include="..\..\src\include\switch_odbc.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="..\..\src\include\switch_pgsql.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\src\include\switch_platform.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -319,6 +331,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="..\..\src\include\switch_ivr.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\libs\libtpl-1.5\src\tpl.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

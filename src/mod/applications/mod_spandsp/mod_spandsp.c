@@ -624,7 +624,7 @@ switch_status_t load_configuration(switch_bool_t reload)
 					switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Missing <descriptor> name\n");
 					switch_goto_status(SWITCH_STATUS_FALSE, done);
 				}
-				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Adding tone_descriptor: %s\n", name);
+				switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG10, "Adding tone_descriptor: %s\n", name);
 				if (tone_descriptor_create(&descriptor, name, spandsp_globals.config_pool) != SWITCH_STATUS_SUCCESS) {
 					switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CRIT, "Unable to allocate tone_descriptor: %s\n", name);
 					switch_goto_status(SWITCH_STATUS_FALSE, done);
@@ -645,7 +645,7 @@ switch_status_t load_configuration(switch_bool_t reload)
 								"Unable to add tone_descriptor: %s, tone: %s.  (too many tones)\n", name, tone_name);
 						switch_goto_status(SWITCH_STATUS_FALSE, done);
 					}
-					switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, 
+					switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG10, 
 							"Adding tone_descriptor: %s, tone: %s(%d)\n", name, tone_name, id);
 					/* add elements to tone */
 					for (element = switch_xml_child(tone, "element"); element; element = switch_xml_next(element)) {
@@ -680,7 +680,7 @@ switch_status_t load_configuration(switch_bool_t reload)
 							switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Invalid element param.\n");
 							switch_goto_status(SWITCH_STATUS_FALSE, done);
 						}
-						switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, 
+						switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG10, 
 								"Adding tone_descriptor: %s, tone: %s(%d), element (%d, %d, %d, %d)\n", name, tone_name, id, freq1, freq2, min, max);
 						tone_descriptor_add_tone_element(descriptor, id, freq1, freq2, min, max);
 					}
@@ -714,9 +714,9 @@ SWITCH_MODULE_LOAD_FUNCTION(mod_spandsp_init)
 				   t38_gateway_function, "", SAF_MEDIA_TAP);
 
 	SWITCH_ADD_APP(app_interface, "rxfax", "FAX Receive Application", "FAX Receive Application", spanfax_rx_function, SPANFAX_RX_USAGE,
-				   SAF_SUPPORT_NOMEDIA);
+				   SAF_SUPPORT_NOMEDIA | SAF_NO_LOOPBACK);
 	SWITCH_ADD_APP(app_interface, "txfax", "FAX Transmit Application", "FAX Transmit Application", spanfax_tx_function, SPANFAX_TX_USAGE,
-				   SAF_SUPPORT_NOMEDIA);
+				   SAF_SUPPORT_NOMEDIA | SAF_NO_LOOPBACK);
 
 	SWITCH_ADD_APP(app_interface, "spandsp_stop_dtmf", "stop inband dtmf", "Stop detecting inband dtmf.", stop_dtmf_session_function, "", SAF_NONE);
 	SWITCH_ADD_APP(app_interface, "spandsp_start_dtmf", "Detect dtmf", "Detect inband dtmf on the session", dtmf_session_function, "", SAF_MEDIA_TAP);

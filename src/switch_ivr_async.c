@@ -311,9 +311,18 @@ static dm_match_t switch_ivr_dmachine_check_match(switch_ivr_dmachine_t *dmachin
 
 	for(bp = dmachine->realm->binding_list; bp; bp = bp->next) {
 		if (bp->is_regex) {
-			switch_status_t r_status = switch_regex_match(dmachine->digits, bp->digits);
-			pmatches = 1;
+			pmatches++;
+		} else {
+			if (!strncmp(dmachine->digits, bp->digits, strlen(dmachine->digits))) {
+				pmatches++;
+			}
+		}
+	}
 
+	for(bp = dmachine->realm->binding_list; bp; bp = bp->next) {
+		if (bp->is_regex) {
+			switch_status_t r_status = switch_regex_match(dmachine->digits, bp->digits);
+			
 			if (r_status == SWITCH_STATUS_SUCCESS) {
 				if (is_timeout || (bp == dmachine->realm->binding_list && !bp->next)) {
 					best = DM_MATCH_EXACT;
@@ -325,11 +334,7 @@ static dm_match_t switch_ivr_dmachine_check_match(switch_ivr_dmachine_t *dmachin
 		} else {
 			int pmatch = !strncmp(dmachine->digits, bp->digits, strlen(dmachine->digits));
 
-			if (pmatch) {
-				pmatches++;
-			}
-
-			if (!exact_bp && pmatch && !strcmp(bp->digits, dmachine->digits)) {
+			if (!exact_bp && pmatch && (pmatches == 1 || is_timeout) && !strcmp(bp->digits, dmachine->digits)) {
 				best = DM_MATCH_EXACT;
 				exact_bp = bp;
 				if (dmachine->cur_digit_len == dmachine->max_digit_len) break;
@@ -575,10 +580,23 @@ static void *SWITCH_THREAD_FUNC echo_video_thread(switch_thread_t *thread, void 
 	switch_channel_t *channel = switch_core_session_get_channel(session);
 	switch_status_t status;
 	switch_frame_t *read_frame;
+	switch_core_session_message_t msg = { 0 };
+
+
+	msg.from = __FILE__;
+	msg.message_id = SWITCH_MESSAGE_INDICATE_VIDEO_REFRESH_REQ;
+	
+	switch_core_session_receive_message(session, &msg);
 
 	eh->up = 1;
 	while (switch_channel_ready(channel)) {
 		status = switch_core_session_read_video_frame(session, &read_frame, SWITCH_IO_FLAG_NONE, 0);
+
+
+		if (switch_channel_test_flag(channel, CF_VIDEO_REFRESH_REQ)) {
+			switch_core_session_receive_message(session, &msg);
+			switch_channel_clear_flag(channel, CF_VIDEO_REFRESH_REQ);
+		}
 
 		if (!SWITCH_READ_ACCEPTABLE(status)) {
 			break;
@@ -601,6 +619,8 @@ SWITCH_DECLARE(void) switch_ivr_session_echo(switch_core_session_t *session, swi
 	switch_status_t status;
 	switch_frame_t *read_frame;
 	switch_channel_t *channel = switch_core_session_get_channel(session);
+	int orig_vid = switch_channel_test_flag(channel, CF_VIDEO);
+
 #ifdef SWITCH_VIDEO_IN_THREADS
 	struct echo_helper eh = { 0 };
 	switch_thread_t *thread;
@@ -610,6 +630,9 @@ SWITCH_DECLARE(void) switch_ivr_session_echo(switch_core_session_t *session, swi
 	if (switch_channel_pre_answer(channel) != SWITCH_STATUS_SUCCESS) {
 		return;
 	}
+
+ restart:
+
 #ifdef SWITCH_VIDEO_IN_THREADS
 	if (switch_channel_test_flag(channel, CF_VIDEO)) {
 		eh.session = session;
@@ -625,6 +648,12 @@ SWITCH_DECLARE(void) switch_ivr_session_echo(switch_core_session_t *session, swi
 		if (!SWITCH_READ_ACCEPTABLE(status)) {
 			break;
 		}
+		
+		if (!orig_vid && switch_channel_test_flag(channel, CF_VIDEO)) {
+			orig_vid = 1;
+			goto restart;
+		}
+
 
 		switch_ivr_parse_all_events(session);
 
@@ -1054,16 +1083,7 @@ static switch_bool_t record_callback(switch_media_bug_t *bug, void *user_data, s
 				switch_event_fire(&event);
 			}
 
-			if ((var = switch_channel_get_variable(channel, "record_post_process_exec_app"))) {
-				char *app = switch_core_session_strdup(session, var);
-				char *data;
-
-				if ((data = strchr(app, ':'))) {
-					*data++ = '\0';
-				}
-
-				switch_core_session_execute_application(session, app, data);
-			}
+			switch_channel_execute_on(channel, "record_post_process_exec_app");
 
 			if ((var = switch_channel_get_variable(channel, "record_post_process_exec_api"))) {
 				char *cmd = switch_core_session_strdup(session, var);
@@ -1805,7 +1825,7 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_record_session(switch_core_session_t 
 		file_path = switch_core_session_strdup(session, file);
 	}
 
-	if (file_path) {
+	if (file_path && !strstr(file_path, SWITCH_URL_SEPARATOR)) {
 		char *p;
 		char *path = switch_core_session_strdup(session, file_path);
 

@@ -26,6 +26,7 @@
  * Anthony Minessale II <anthm@freeswitch.org>
  * Bret McDanel <trixter AT 0xdecafbad dot com>
  * Joseph Sullivan <jossulli@amazon.com>
+ * Raymond Chandler <intralanman@freeswitch.org>
  *
  * switch_types.h -- Data Types
  *
@@ -107,12 +108,13 @@ SWITCH_BEGIN_EXTERN_C
 #define SWITCH_SEQ_CLEARSCR SWITCH_SEQ_ESC SWITCH_SEQ_CLEARSCR_CHAR SWITCH_SEQ_HOME
 #endif
 #define SWITCH_DEFAULT_CLID_NAME ""
+#define SWITCH_DEFAULT_CLID_NUMBER "0000000000"
 #define SWITCH_DEFAULT_DTMF_DURATION 2000
 #define SWITCH_MIN_DTMF_DURATION 400
 #define SWITCH_MAX_DTMF_DURATION 192000
 #define SWITCH_DEFAULT_DIR_PERMS SWITCH_FPROT_UREAD | SWITCH_FPROT_UWRITE | SWITCH_FPROT_UEXECUTE | SWITCH_FPROT_GREAD | SWITCH_FPROT_GEXECUTE
 #ifdef WIN32
-#define SWITCH_PATH_SEPARATOR "\\"
+#define SWITCH_PATH_SEPARATOR "/"
 #else
 #define SWITCH_PATH_SEPARATOR "/"
 #endif
@@ -144,6 +146,7 @@ SWITCH_BEGIN_EXTERN_C
 #define SWITCH_CHANNEL_EXECUTE_ON_TONE_DETECT_VARIABLE "execute_on_tone_detect"
 #define SWITCH_CHANNEL_EXECUTE_ON_ORIGINATE_VARIABLE "execute_on_originate"
 #define SWITCH_CHANNEL_EXECUTE_ON_POST_ORIGINATE_VARIABLE "execute_on_post_originate"
+#define SWITCH_CHANNEL_EXECUTE_ON_PRE_ORIGINATE_VARIABLE "execute_on_pre_originate"
 
 #define SWITCH_CHANNEL_API_ON_ANSWER_VARIABLE "api_on_answer"
 #define SWITCH_CHANNEL_API_ON_PRE_ANSWER_VARIABLE "api_on_pre_answer"
@@ -152,6 +155,7 @@ SWITCH_BEGIN_EXTERN_C
 #define SWITCH_CHANNEL_API_ON_TONE_DETECT_VARIABLE "api_on_tone_detect"
 #define SWITCH_CHANNEL_API_ON_ORIGINATE_VARIABLE "api_on_originate"
 #define SWITCH_CHANNEL_API_ON_POST_ORIGINATE_VARIABLE "api_on_post_originate"
+#define SWITCH_CHANNEL_API_ON_PRE_ORIGINATE_VARIABLE "api_on_pre_originate"
 
 #define SWITCH_CALL_TIMEOUT_VARIABLE "call_timeout"
 #define SWITCH_HOLDING_UUID_VARIABLE "holding_uuid"
@@ -161,6 +165,7 @@ SWITCH_BEGIN_EXTERN_C
 #define SWITCH_API_REPORTING_HOOK_VARIABLE "api_reporting_hook"
 #define SWITCH_SESSION_IN_HANGUP_HOOK_VARIABLE "session_in_hangup_hook"
 #define SWITCH_PROCESS_CDR_VARIABLE "process_cdr"
+#define SWITCH_SKIP_CDR_CAUSES_VARIABLE "skip_cdr_causes"
 #define SWITCH_FORCE_PROCESS_CDR_VARIABLE "force_process_cdr"
 #define SWITCH_BRIDGE_CHANNEL_VARIABLE "bridge_channel"
 #define SWITCH_CHANNEL_NAME_VARIABLE "channel_name"
@@ -210,6 +215,7 @@ SWITCH_BEGIN_EXTERN_C
 #define SWITCH_BITS_PER_BYTE 8
 #define SWITCH_DEFAULT_FILE_BUFFER_LEN 65536
 #define SWITCH_DTMF_LOG_LEN 1000
+#define SWITCH_MAX_TRANS 2000
 typedef uint8_t switch_byte_t;
 
 /*!
@@ -321,9 +327,10 @@ typedef enum {
 	SCF_CLEAR_SQL = (1 << 17),
 	SCF_THREADED_SYSTEM_EXEC = (1 << 18),
 	SCF_SYNC_CLOCK_REQUESTED = (1 << 19),
-	SCF_CORE_ODBC_REQ = (1 << 20),
+	SCF_CORE_NON_SQLITE_DB_REQ = (1 << 20),
 	SCF_DEBUG_SQL = (1 << 21),
-	SCF_API_EXPANSION = (1 << 22)
+	SCF_API_EXPANSION = (1 << 22),
+	SCF_SESSION_THREAD_POOL = (1 << 23)
 } switch_core_flag_enum_t;
 typedef uint32_t switch_core_flag_t;
 
@@ -470,6 +477,7 @@ struct switch_directories {
 	char *storage_dir;
 	char *recordings_dir;
 	char *sounds_dir;
+	char *lib_dir;
 };
 
 typedef struct switch_directories switch_directories;
@@ -899,10 +907,12 @@ typedef enum {
 	SWITCH_MESSAGE_INDICATE_JITTER_BUFFER,
 	SWITCH_MESSAGE_INDICATE_RECOVERY_REFRESH,
 	SWITCH_MESSAGE_INDICATE_SIGNAL_DATA,
+	SWITCH_MESSAGE_INDICATE_MESSAGE,
 	SWITCH_MESSAGE_INDICATE_INFO,
 	SWITCH_MESSAGE_INDICATE_AUDIO_DATA,
 	SWITCH_MESSAGE_INDICATE_BLIND_TRANSFER_RESPONSE,
 	SWITCH_MESSAGE_INDICATE_STUN_ERROR,
+	SWITCH_MESSAGE_INDICATE_MEDIA_RENEG,
 	SWITCH_MESSAGE_INVALID
 } switch_core_session_message_types_t;
 
@@ -1024,7 +1034,8 @@ typedef enum {
 	SWITCH_LOG_CRIT = 2,
 	SWITCH_LOG_ALERT = 1,
 	SWITCH_LOG_CONSOLE = 0,
-	SWITCH_LOG_INVALID = 64
+	SWITCH_LOG_INVALID = 64,
+	SWITCH_LOG_UNINIT = 1000,
 } switch_log_level_t;
 
 
@@ -1162,6 +1173,7 @@ typedef enum {
 	CF_OUTBOUND,
 	CF_EARLY_MEDIA,
 	CF_BRIDGE_ORIGINATOR,
+	CF_UUID_BRIDGE_ORIGINATOR,
 	CF_TRANSFER,
 	CF_ACCEPT_CNG,
 	CF_REDIRECT,
@@ -1236,6 +1248,14 @@ typedef enum {
 	CF_CONFIRM_BLIND_TRANSFER,
 	CF_NO_PRESENCE,
 	CF_CONFERENCE,
+	CF_RECOVERING,
+	CF_RECOVERING_BRIDGE,
+	CF_TRACKED,
+	CF_TRACKABLE,
+	CF_NO_CDR,
+	CF_EARLY_OK,
+	CF_MEDIA_TRANS,
+	CF_HOLD_ON_BRIDGE,
 	/* WARNING: DO NOT ADD ANY FLAGS BELOW THIS LINE */
 	/* IF YOU ADD NEW ONES CHECK IF THEY SHOULD PERSIST OR ZERO THEM IN switch_core_session.c switch_core_session_request_xml() */
 	CF_FLAG_MAX
@@ -1285,7 +1305,8 @@ typedef enum {
 	SAF_SUPPORT_NOMEDIA = (1 << 0),
 	SAF_ROUTING_EXEC = (1 << 1),
 	SAF_MEDIA_TAP = (1 << 2),
-	SAF_ZOMBIE_EXEC = (1 << 3)
+	SAF_ZOMBIE_EXEC = (1 << 3),
+	SAF_NO_LOOPBACK = (1 << 4)
 } switch_application_flag_enum_t;
 typedef uint32_t switch_application_flag_t;
 
@@ -1413,6 +1434,11 @@ typedef enum {
 	SWITCH_CODEC_TYPE_T38,
 	SWITCH_CODEC_TYPE_APP
 } switch_codec_type_t;
+
+typedef enum {
+	SWITCH_MEDIA_TYPE_AUDIO,
+	SWITCH_MEDIA_TYPE_VIDEO
+} switch_media_type_t;
 
 
 /*!
@@ -1737,7 +1763,8 @@ typedef enum {
 	SWITCH_CAUSE_INVALID_GATEWAY = 608,
 	SWITCH_CAUSE_GATEWAY_DOWN = 609,
 	SWITCH_CAUSE_INVALID_URL = 610,
-	SWITCH_CAUSE_INVALID_PROFILE = 611
+	SWITCH_CAUSE_INVALID_PROFILE = 611,
+	SWITCH_CAUSE_NO_PICKUP = 612
 } switch_call_cause_t;
 
 typedef enum {
@@ -1777,7 +1804,8 @@ typedef enum {
 	SCSC_SYNC_CLOCK_WHEN_IDLE,
 	SCSC_DEBUG_SQL,
 	SCSC_SQL,
-	SCSC_API_EXPANSION
+	SCSC_API_EXPANSION,
+	SCSC_RECOVER
 } switch_session_ctl_t;
 
 typedef enum {
@@ -1805,6 +1833,7 @@ typedef struct switch_loadable_module switch_loadable_module_t;
 typedef struct switch_frame switch_frame_t;
 typedef struct switch_rtcp_frame switch_rtcp_frame_t;
 typedef struct switch_channel switch_channel_t;
+typedef struct switch_sql_queue_manager switch_sql_queue_manager_t;
 typedef struct switch_file_handle switch_file_handle_t;
 typedef struct switch_core_session switch_core_session_t;
 typedef struct switch_caller_profile switch_caller_profile_t;
@@ -1819,6 +1848,8 @@ typedef struct switch_buffer switch_buffer_t;
 typedef struct switch_codec_settings switch_codec_settings_t;
 typedef struct switch_codec_fmtp switch_codec_fmtp_t;
 typedef struct switch_odbc_handle switch_odbc_handle_t;
+typedef struct switch_pgsql_handle switch_pgsql_handle_t;
+typedef struct switch_pgsql_result switch_pgsql_result_t;
 
 typedef struct switch_io_routines switch_io_routines_t;
 typedef struct switch_speech_handle switch_speech_handle_t;
@@ -1890,6 +1921,7 @@ typedef switch_status_t (*switch_chat_application_function_t) (switch_event_t *,
 typedef void (*switch_application_function_t) (switch_core_session_t *, const char *);
 #define SWITCH_STANDARD_APP(name) static void name (switch_core_session_t *session, const char *data)
 
+typedef int (*switch_core_recover_callback_t)(switch_core_session_t *session);
 typedef void (*switch_event_callback_t) (switch_event_t *);
 typedef switch_caller_extension_t *(*switch_dialplan_hunt_function_t) (switch_core_session_t *, void *, switch_caller_profile_t *);
 #define SWITCH_STANDARD_DIALPLAN(name) static switch_caller_extension_t *name (switch_core_session_t *session, void *arg, switch_caller_profile_t *caller_profile)
@@ -2002,6 +2034,13 @@ typedef switch_status_t (*switch_module_shutdown_t) SWITCH_MODULE_SHUTDOWN_ARGS;
 #define SWITCH_MODULE_SHUTDOWN_FUNCTION(name) switch_status_t name SWITCH_MODULE_SHUTDOWN_ARGS
 
 typedef enum {
+	SWITCH_PRI_LOW = 1,
+	SWITCH_PRI_NORMAL = 10,
+	SWITCH_PRI_IMPORTANT = 50,
+	SWITCH_PRI_REALTIME = 99,
+} switch_thread_priority_t;
+
+typedef enum {
 	SMODF_NONE = 0,
 	SMODF_GLOBAL_SYMBOLS = (1 << 0)
 } switch_module_flag_enum_t;
@@ -2041,6 +2080,7 @@ struct switch_core_session;
 struct switch_media_bug;
 /*! \brief A digit stream parser object */
 struct switch_ivr_digit_stream_parser;
+struct sql_queue_manager;
 
 SWITCH_END_EXTERN_C
 #endif

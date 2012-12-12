@@ -103,13 +103,14 @@ $(RECURSIVE_TARGETS): freeswitch
 
 CORE_CFLAGS  = `$(switch_builddir)/libs/apr/apr-1-config --cflags --cppflags --includes`
 CORE_CFLAGS += `$(switch_builddir)/libs/apr-util/apu-1-config --includes`
+CORE_CFLAGS += -I$(switch_srcdir)/libs/libtpl-1.5/src
 CORE_CFLAGS += -I$(switch_srcdir)/libs/stfu
 CORE_CFLAGS += -I$(switch_builddir)/libs/sqlite
 CORE_CFLAGS += -I$(switch_srcdir)/libs/pcre
 CORE_CFLAGS += -I$(switch_srcdir)/libs/speex/include -Ilibs/speex/include
 CORE_CFLAGS += -I$(switch_srcdir)/libs/srtp/include
 CORE_CFLAGS += -I$(switch_srcdir)/libs/srtp/crypto/include -Ilibs/srtp/crypto/include
-CORE_CFLAGS += -I$(switch_srcdir)/libs/spandsp/src -I$(switch_srcdir)/libs/tiff-3.8.2/libtiff
+CORE_CFLAGS += -I$(switch_srcdir)/libs/spandsp/src -I$(switch_srcdir)/libs/tiff-4.0.2/libtiff
 
 CORE_LIBS  = libs/apr-util/libaprutil-1.la libs/apr/libapr-1.la
 CORE_LIBS += libs/sqlite/libsqlite3.la libs/pcre/libpcre.la libs/speex/libspeex/libspeexdsp.la
@@ -201,11 +202,14 @@ library_include_HEADERS = \
 	src/include/switch_xml_config.h \
 	src/include/switch_cpp.h \
 	src/include/switch_json.h \
+	libs/stfu/stfu.h \
 	libs/libteletone/src/libteletone_detect.h \
 	libs/libteletone/src/libteletone_generate.h \
 	libs/libteletone/src/libteletone.h \
+	libs/libtpl-1.5/src/tpl.h \
 	src/include/switch_limit.h \
-	src/include/switch_odbc.h
+	src/include/switch_odbc.h \
+	src/include/switch_pgsql.h
 
 nodist_libfreeswitch_la_SOURCES = \
 	src/include/switch_frame.h \
@@ -260,12 +264,14 @@ libfreeswitch_la_SOURCES = \
 	src/switch_config.c \
 	src/switch_time.c \
 	src/switch_odbc.c \
+	src/switch_pgsql.c \
 	src/switch_limit.c \
 	src/g711.c \
 	src/switch_pcm.c \
 	src/switch_profile.c \
 	src/switch_json.c \
 	src/switch_curl.c \
+	libs/libtpl-1.5/src/tpl.c \
 	libs/stfu/stfu.c \
 	libs/libteletone/src/libteletone_detect.c \
 	libs/libteletone/src/libteletone_generate.c \
@@ -424,8 +430,8 @@ src/include/switch_version.h: src/include/switch_version.h.in Makefile build/pri
 	  xver="$$(./build/print_git_revision)"; \
 	  xhver="$$(./build/print_git_revision -h)"; \
 	  sed \
-	    -e "/#define *SWITCH_VERSION_REVISION\W/{s/\"\([^\"]*\)\"/\"\1$$xver\"/;}" \
-	    -e "/#define *SWITCH_VERSION_REVISION_HUMAN\W/{s/\"\([^\"]*\)\"/\"\1$$xhver\"/;}" \
+	    -e "/#define *SWITCH_VERSION_REVISION[^a-zA-Z0-9_]/{s/\"\([^\"]*\)\"/\"\1$$xver\"/;}" \
+	    -e "/#define *SWITCH_VERSION_REVISION_HUMAN[^a-zA-Z0-9_]/{s/\"\([^\"]*\)\"/\"\1$$xhver\"/;}" \
 	    $< > $@; \
 	fi;
 
@@ -445,27 +451,43 @@ libs/curl/lib/libcurl.la: libs/curl libs/curl/Makefile
 	@cd libs/curl && $(MAKE)
 	@$(TOUCH_TARGET)
 
-libs/apr/libapr-1.la: libs/apr libs/apr/.update
+libs/apr/Makefile: libs/apr/Makefile.in libs/apr/config.status libs/apr libs/apr/.update
+	@cd libs/apr && ./config.status
+	@$(TOUCH_TARGET)
+
+libs/apr/libapr-1.la: libs/apr/Makefile libs/apr/.update
+	touch src/include/switch.h
 	@cd libs/apr && $(MAKE)
 	@$(TOUCH_TARGET)
 
 libs/apr-util/libaprutil-1.la: libs/apr-util libs/apr-util/.update libs/apr/libapr-1.la
+	touch src/include/switch.h
 	@cd libs/apr-util && $(MAKE)
 	@$(TOUCH_TARGET)
 
 libs/speex/libspeex/libspeexdsp.la: libs/speex/.update
+	touch src/include/switch.h
 	@cd libs/speex && $(MAKE)
 	@$(TOUCH_TARGET)
 
-libs/sqlite/libsqlite3.la: libs/sqlite libs/sqlite/.update
+libs/sqlite/libsqlite3.la: libs/sqlite libs/sqlite/Makefile libs/sqlite/.update
+	touch src/include/switch.h
 	@cd libs/sqlite && $(MAKE) CFLAGS="$(SWITCH_AM_CFLAGS)"
 	@$(TOUCH_TARGET)
 
+libs/sqlite/Makefile: libs/sqlite/configure.ac
+	cd libs/sqlite && autoconf
+	cd libs/sqlite && ./config.status --recheck
+	cd libs/sqlite && ./config.status
+	@$(TOUCH_TARGET)
+
 libs/pcre/libpcre.la: libs/pcre libs/pcre/.update
+	touch src/include/switch.h
 	@cd libs/pcre && $(MAKE)
 	@$(TOUCH_TARGET)
 
 libs/srtp/libsrtp.la: libs/srtp libs/srtp/.update
+	touch src/include/switch.h
 	@cd libs/srtp && $(MAKE)
 	@$(TOUCH_TARGET)
 
@@ -585,7 +607,14 @@ libs/openzap/Makefile:
 	cd libs/openzap && autoconf
 	cd libs/openzap && ./configure
 
+version:
+	git log -1  | head -3
+
 reinstall: modwipe uninstall install
+
+pristine:
+	git clean -fdx
+	git reset --hard
 
 update-clean: clean libs/openzap/Makefile python-reconf
 	cd libs/sofia-sip && $(MAKE) clean
@@ -599,13 +628,6 @@ swigall:
 	@echo reswigging all
 	sh $(switch_srcdir)/build/swigall.sh
 
-sure: current
-
-speedy-sure: update-clean
-	$(MAKE) -j core
-	cd libs/sofia-sip && $(MAKE) -j
-	$(MAKE) -j modules
-
 speex-reconf:
 	cd libs/speex && autoreconf
 	cd libs/speex && ./config.status --recheck
@@ -617,11 +639,9 @@ sndfile-reconf:
 	cd libs/libsndfile && ./config.status
 
 tiff-reconf:
-	cd libs/tiff-3.8.2 && autoreconf -fi
-	cd libs/tiff-3.8.2 && sh ./configure.gnu
-	cd libs/spandsp && autoreconf -fi
-	cd libs/spandsp && sh ./configure.gnu
-	make mod_voipcodecs-clean
+	cd libs/tiff-4.0.2 && autoreconf -fi
+	cd libs/tiff-4.0.2 && sh ./configure.gnu
+	cd libs/tiff-4.0.2 && make
 
 python-reconf:
 	rm -f src/mod/languages/mod_python/Makefile
@@ -644,7 +664,7 @@ iks-reconf:
 	cd libs/iksemel && sh ./configure.gnu --prefix=$(prefix)
 	$(MAKE) mod_dingaling-clean
 
-spandsp-reconf:
+spandsp-reconf: tiff-reconf
 	cd libs/spandsp && $(MAKE) clean || echo
 	cd libs/spandsp && autoreconf -fi
 	cd libs/spandsp && sh ./configure.gnu --prefix=$(prefix)
@@ -659,10 +679,18 @@ cluecon:
 	@clear
 	@echo Thank you for updating. This is going to take a while so relax.
 	@echo Now would be a good time to register for ClueCon!
-	@cat cluecon.tmpl
+	@cat cluecon2.tmpl
 	@echo
 	@echo http://www.cluecon.com
 	@sleep 5
+
+sure: is-scm pristine update
+	git pull
+	sh bootstrap.sh
+	sh configure $(CONFIGURE_ARGS)
+	make $(MAKE_ARGS)
+	make reinstall
+
 current: cluecon update-clean is-scm
 	$(MAKE) update
 	$(MAKE) all
@@ -694,7 +722,7 @@ modclean: $(switch_builddir)/modules.conf
 	@cd src/mod && $(MAKE) $(AM_MAKEFLAGS) clean
 
 modwipe:
-	rm -f $(modulesdir)/*.${DYNAMIC_LIB_EXTEN}
+	rm -f $(modulesdir)/*.${DYNAMIC_LIB_EXTEN} $(modulesdir)/*.la
 
 dox:
 	cd docs && doxygen $(PWD)/docs/Doxygen.conf

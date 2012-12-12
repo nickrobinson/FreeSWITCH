@@ -590,7 +590,7 @@ switch_call_cause_t rtmp_outgoing_channel(switch_core_session_t *session, switch
 		goto fail;
 	}
 	
-	if (!(*newsession = switch_core_session_request(rtmp_globals.rtmp_endpoint_interface, flags, SWITCH_CALL_DIRECTION_OUTBOUND, inpool))) {
+	if (!(*newsession = switch_core_session_request_uuid(rtmp_globals.rtmp_endpoint_interface, flags, SWITCH_CALL_DIRECTION_OUTBOUND, inpool, switch_event_get_header(var_event, "origination_uuid")))) {
 		goto fail;
 	}
 	
@@ -634,7 +634,7 @@ switch_call_cause_t rtmp_outgoing_channel(switch_core_session_t *session, switch
 
 	switch_core_hash_insert_wrlock(rsession->session_hash, switch_core_session_get_uuid(*newsession), tech_pvt, rsession->session_rwlock);
 		
-	if (switch_core_session_thread_launch(tech_pvt->session) != SWITCH_STATUS_SUCCESS) {
+	if (switch_core_session_thread_launch(tech_pvt->session) == SWITCH_STATUS_FALSE) {
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Couldn't spawn thread\n");	
 		goto fail;
 	}
@@ -647,7 +647,9 @@ switch_call_cause_t rtmp_outgoing_channel(switch_core_session_t *session, switch
 	
 fail:
 	if (*newsession) {
-		switch_core_session_destroy(newsession);
+		if (!switch_core_session_running(*newsession) && !switch_core_session_started(*newsession)) {
+			switch_core_session_destroy(newsession);
+		}
 	}
 	if (rsession) {
 		rtmp_session_rwunlock(rsession);
@@ -847,6 +849,7 @@ switch_call_cause_t rtmp_session_create_call(rtmp_session_t *rsession, switch_co
 		return SWITCH_CAUSE_DESTINATION_OUT_OF_ORDER;
 	}
 
+
 	pool = switch_core_session_get_pool(*newsession);	
  	channel = switch_core_session_get_channel(*newsession);
 	switch_channel_set_name(channel, switch_core_session_sprintf(*newsession, "rtmp/%s/%s", rsession->profile->name, number));
@@ -871,7 +874,7 @@ switch_call_cause_t rtmp_session_create_call(rtmp_session_t *rsession, switch_co
 	
 	caller_profile = switch_caller_profile_new(pool, switch_str_nil(auth_user), dialplan, 
 		SWITCH_DEFAULT_CLID_NAME, 
-		!zstr(auth_user) ? auth_user : "0000000000", 
+		!zstr(auth_user) ? auth_user : SWITCH_DEFAULT_CLID_NUMBER,
 		rsession->remote_address /* net addr */, 
 		NULL /* ani   */, 
 		NULL /* anii  */, 
@@ -911,17 +914,21 @@ switch_call_cause_t rtmp_session_create_call(rtmp_session_t *rsession, switch_co
 		}
 	}
 
-	switch_core_hash_insert_wrlock(rsession->session_hash, switch_core_session_get_uuid(*newsession), tech_pvt, rsession->session_rwlock);
-
-	if (switch_core_session_thread_launch(tech_pvt->session) != SWITCH_STATUS_SUCCESS) {
+	if (switch_core_session_thread_launch(tech_pvt->session) == SWITCH_STATUS_FALSE) {
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Couldn't spawn thread\n");
 		goto fail;
 	}
 
+	switch_core_hash_insert_wrlock(rsession->session_hash, switch_core_session_get_uuid(*newsession), tech_pvt, rsession->session_rwlock);
+	
 	return SWITCH_CAUSE_SUCCESS;
 	
 fail:
-	switch_core_session_destroy(newsession);
+
+	if (!switch_core_session_running(*newsession) && !switch_core_session_started(*newsession)) {
+		switch_core_session_destroy(newsession);
+	}
+
 	return SWITCH_CAUSE_DESTINATION_OUT_OF_ORDER;	
 }
 

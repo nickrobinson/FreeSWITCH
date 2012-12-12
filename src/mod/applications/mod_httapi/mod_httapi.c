@@ -597,8 +597,8 @@ static switch_status_t parse_playback(const char *tag_name, client_t *client, sw
 				switch_ivr_play_file(client->session, NULL, error_file, &nullargs);
 				switch_event_add_header_string(client->one_time_params, SWITCH_STACK_BOTTOM, name, "invalid");
 				switch_event_add_header_string(client->one_time_params, SWITCH_STACK_BOTTOM, "input_type", "invalid");
-				status = SWITCH_STATUS_SUCCESS;
 			}
+			status = SWITCH_STATUS_SUCCESS;
 		} else if (status == SWITCH_STATUS_FOUND) {
 			status = SWITCH_STATUS_SUCCESS;
 			submit = 1;
@@ -887,7 +887,7 @@ static switch_status_t parse_record(const char *tag_name, client_t *client, swit
 	const char *digit_timeout_ = switch_xml_attr(tag, "digit-timeout");
 	char *loops_ = (char *) switch_xml_attr(tag, "loops");
 	int loops = 0;
-	switch_status_t status = SWITCH_STATUS_FALSE;
+	switch_status_t status = SWITCH_STATUS_SUCCESS;
 	switch_ivr_dmachine_t *dmachine = NULL;
 	switch_input_args_t *args = NULL, myargs = { 0 };
 	long digit_timeout = 1500;
@@ -1020,6 +1020,10 @@ static switch_status_t parse_record(const char *tag_name, client_t *client, swit
 		fh.silence_hits = silence_hits;
 		
 		status = switch_ivr_record_file(client->session, &fh, tmp_record_path, args, record_limit);
+	}
+
+	if (switch_channel_ready(client->channel)) {
+		status = SWITCH_STATUS_SUCCESS;
 	}
 
 	if (client->matching_action_binding) {
@@ -1326,7 +1330,6 @@ static void cleanup_attachments(client_t *client)
 	for (hp = client->params->headers; hp; hp = hp->next) {
 		if (!strncasecmp(hp->name, "attach_file:", 12)) {
 			if (switch_file_exists(hp->value, client->pool) == SWITCH_STATUS_SUCCESS) {
-				printf("DELETE %s\n", hp->value);
 				unlink(hp->value);
 			}
 		}	
@@ -1967,19 +1970,19 @@ static switch_status_t do_config(void)
 				} else if (!strcasecmp(var, "dial")) {
 					profile->perms.dial.enabled = switch_true(val);
 				} else if (!strcasecmp(var, "dial-set-context")) {
-					profile->perms.dial.enabled = switch_true(val);
+					if (switch_true(val)) profile->perms.dial.enabled = SWITCH_TRUE;
 					profile->perms.dial.set_context = switch_true(val);
 				} else if (!strcasecmp(var, "dial-set-dialplan")) {
-					profile->perms.dial.enabled = switch_true(val);
+					if (switch_true(val)) profile->perms.dial.enabled = SWITCH_TRUE;
 					profile->perms.dial.set_dp = switch_true(val);
 				} else if (!strcasecmp(var, "dial-set-cid-name")) {
-					profile->perms.dial.enabled = switch_true(val);
+					if (switch_true(val)) profile->perms.dial.enabled = SWITCH_TRUE;
 					profile->perms.dial.set_cid_name = switch_true(val);
 				} else if (!strcasecmp(var, "dial-set-cid-number")) {
-					profile->perms.dial.enabled = switch_true(val);
+					if (switch_true(val)) profile->perms.dial.enabled = SWITCH_TRUE;
 					profile->perms.dial.set_cid_number = switch_true(val);
 				} else if (!strcasecmp(var, "dial-full-originate")) {
-					profile->perms.dial.enabled = switch_true(val);
+					if (switch_true(val)) profile->perms.dial.enabled = SWITCH_TRUE;
 					profile->perms.dial.full_originate = switch_true(val);
 				} else if (!strcasecmp(var, "conference")) {
 					profile->perms.conference.enabled = switch_true(val);
@@ -2273,7 +2276,9 @@ static char *load_cache_data(http_file_context_t *context, const char *url)
 
 			if ((p = strchr(meta_buffer, ':'))) {
 				*p++ = '\0';
-				context->expires = (time_t) atol(meta_buffer);
+				if (context->expires != 1) {
+					context->expires = (time_t) atol(meta_buffer);
+				}
 				context->metadata = switch_core_strdup(context->pool, p);
 			}
 		}
@@ -2519,44 +2524,53 @@ static switch_status_t locate_url_file(http_file_context_t *context, const char 
 
 	load_cache_data(context, url);
 
-	if (context->expires && now < context->expires) {
+	if (context->expires > 1 && now < context->expires) {
 		return SWITCH_STATUS_SUCCESS;
 	}
 
 	lock_file(context, SWITCH_TRUE);
 
-	if ((status = fetch_cache_data(context, url, &headers, NULL)) != SWITCH_STATUS_SUCCESS) {
-		if (status == SWITCH_STATUS_NOTFOUND) {
-			unreachable = 2;
-			if (now - context->expires < globals.not_found_expires) {
+	if (!context->url_params || !switch_true(switch_event_get_header(context->url_params, "nohead"))) {
+		if ((status = fetch_cache_data(context, url, &headers, NULL)) != SWITCH_STATUS_SUCCESS) {
+			if (status == SWITCH_STATUS_NOTFOUND) {
+				unreachable = 2;
+				if (now - context->expires < globals.not_found_expires) {
+					switch_goto_status(SWITCH_STATUS_SUCCESS, end);
+				}
+			} else {
+				unreachable = 1;
+			}
+		}
+		
+		if (switch_file_exists(context->cache_file, context->pool) != SWITCH_STATUS_SUCCESS && unreachable) {
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "File at url [%s] is unreachable!\n", url);
+			goto end;
+		}
+		
+		if (!unreachable && !zstr(context->metadata)) {
+			metadata = switch_core_sprintf(context->pool, "%s:%s:%s:%s",
+										   url,
+										   switch_event_get_header_nil(headers, "last-modified"),
+										   switch_event_get_header_nil(headers, "etag"),
+										   switch_event_get_header_nil(headers, "content-length")
+										   );
+
+			if (!strcmp(metadata, context->metadata)) {
+				write_meta_file(context, metadata, headers);
 				switch_goto_status(SWITCH_STATUS_SUCCESS, end);
 			}
-		} else {
-			unreachable = 1;
 		}
+		
+		switch_event_destroy(&headers);
 	}
 
-	if (switch_file_exists(context->cache_file, context->pool) != SWITCH_STATUS_SUCCESS && unreachable) {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "File at url [%s] is unreachable!\n", url);
+
+	if ((status = fetch_cache_data(context, url, &headers, context->cache_file)) != SWITCH_STATUS_SUCCESS) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Error checking file cache (check permissions)\n");
 		goto end;
 	}
 
-	if (!unreachable && !zstr(context->metadata)) {
-		metadata = switch_core_sprintf(context->pool, "%s:%s:%s:%s",
-									   url,
-									   switch_event_get_header_nil(headers, "last-modified"),
-									   switch_event_get_header_nil(headers, "etag"),
-									   switch_event_get_header_nil(headers, "content-length")
-									   );
 
-		if (!strcmp(metadata, context->metadata)) {
-			write_meta_file(context, metadata, headers);
-			switch_goto_status(SWITCH_STATUS_SUCCESS, end);
-		}
-	}
-
-	switch_event_destroy(&headers);
-	fetch_cache_data(context, url, &headers, context->cache_file);
 	metadata = switch_core_sprintf(context->pool, "%s:%s:%s:%s",
 								   url,
 								   switch_event_get_header_nil(headers, "last-modified"),
@@ -2611,7 +2625,13 @@ static switch_status_t http_file_file_open(switch_file_handle_t *handle, const c
 	switch_event_create_brackets(pdup, '(', ')', ',', &context->url_params, &parsed, SWITCH_FALSE);
 
 	if (context->url_params) {
+		const char *var;
 		context->ua = switch_event_get_header(context->url_params, "ua");
+
+		if ((var = switch_event_get_header(context->url_params, "cache")) && !switch_true(var)) {
+			context->expires = 1;
+		}
+
 	}
 
 	if (parsed) path = parsed;

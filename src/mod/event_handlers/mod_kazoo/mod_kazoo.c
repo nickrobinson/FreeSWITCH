@@ -233,7 +233,6 @@ static switch_xml_t fetch_handler(const char *section, const char *tag_name, con
 	switch_uuid_t uuid;
 	listener_t *listener = NULL;
 	switch_time_t now = 0;
-	int found_bindings = 0;
 
 	if (!switch_test_flag(&globals, LFLAG_RUNNING) || !acceptor.ready) {
 		return xml;
@@ -274,9 +273,7 @@ static switch_xml_t fetch_handler(const char *section, const char *tag_name, con
 
 			dup_uuid = strdup(fetch_msg->uuid_str);
 
-			if (switch_queue_trypush(listener->fetch_queue, dup_uuid) == SWITCH_STATUS_SUCCESS) {
-				found_bindings = 1;
-			} else {
+			if (switch_queue_trypush(listener->fetch_queue, dup_uuid) != SWITCH_STATUS_SUCCESS) {
 				switch_safe_free(dup_uuid);				
 			}
 		}

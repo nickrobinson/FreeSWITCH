@@ -43,7 +43,7 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..\..\src\include;..\..\libs\include;..\..\libs\srtp\include;..\..\libs\srtp\crypto\include;..\..\libs\libteletone\src;..\..\libs\win32\sqlite;..\..\libs\pcre;..\..\libs\stfu;..\..\libs\speex\include"
+				AdditionalIncludeDirectories="..\..\src\include;..\..\libs\include;..\..\libs\srtp\include;..\..\libs\srtp\crypto\include;..\..\libs\libteletone\src;..\..\libs\win32\sqlite;..\..\libs\pcre;..\..\libs\stfu;..\..\libs\speex\include;libs\libtpl-1.5\src;libs\libtpl-1.5\src\win;"
 				PreprocessorDefinitions="WIN32;_DEBUG;_WINDOWS;_USRDLL;FREESWITCHCORE_EXPORTS;PCRE_STATIC;STATICLIB"
 				MinimalRebuild="true"
 				BasicRuntimeChecks="3"
@@ -136,7 +136,7 @@
 			<Tool
 				Name="VCCLCompilerTool"
 				Optimization="0"
-				AdditionalIncludeDirectories="..\..\src\include;..\..\libs\include;..\..\libs\srtp\include;..\..\libs\srtp\crypto\include;..\..\libs\libteletone\src;..\..\libs\win32\sqlite;..\..\libs\pcre;..\..\libs\stfu;..\..\libs\speex\include"
+				AdditionalIncludeDirectories="..\..\src\include;..\..\libs\include;..\..\libs\srtp\include;..\..\libs\srtp\crypto\include;..\..\libs\libteletone\src;..\..\libs\win32\sqlite;..\..\libs\pcre;..\..\libs\stfu;..\..\libs\speex\include;libs\libtpl-1.5\src;libs\libtpl-1.5\src\win;"
 				PreprocessorDefinitions="WIN32;NDEBUG;_WINDOWS;_USRDLL;FREESWITCHCORE_EXPORTS;STATICLIB;CRASH_PROT;PCRE_STATIC"
 				RuntimeLibrary="2"
 				UsePrecompiledHeader="2"
@@ -248,6 +248,54 @@
 			</File>
 			<File
 				RelativePath="..\..\libs\stfu\stfu.c"
+				>
+				<FileConfiguration
+					Name="Debug|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						UsePrecompiledHeader="0"
+						PrecompiledHeaderThrough=""
+						PrecompiledHeaderFile=""
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Release|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						UsePrecompiledHeader="0"
+						PrecompiledHeaderThrough=""
+						PrecompiledHeaderFile=""
+					/>
+				</FileConfiguration>
+			</File>
+			<File
+				RelativePath="..\..\libs\libtpl-1.5\src\tpl.c"
+				>
+				<FileConfiguration
+					Name="Debug|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						UsePrecompiledHeader="0"
+						PrecompiledHeaderThrough=""
+						PrecompiledHeaderFile=""
+					/>
+				</FileConfiguration>
+				<FileConfiguration
+					Name="Release|Win32"
+					>
+					<Tool
+						Name="VCCLCompilerTool"
+						UsePrecompiledHeader="0"
+						PrecompiledHeaderThrough=""
+						PrecompiledHeaderFile=""
+					/>
+				</FileConfiguration>
+			</File>
+			<File
+				RelativePath="..\..\libs\libtpl-1.5\src\win\mmap.c"
 				>
 				<FileConfiguration
 					Name="Debug|Win32"
@@ -484,6 +532,10 @@
 			</File>
 			<File
 				RelativePath="..\..\src\switch_odbc.c"
+				>
+			</File>
+			<File
+				RelativePath="..\..\src\switch_pgsql.c"
 				>
 			</File>
 			<File
@@ -881,6 +933,14 @@
 				>
 			</File>
 			<File
+				RelativePath="..\..\libs\libtpl-1.5\src\tpl.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\libs\libtpl-1.5\src\win\mman.h"
+				>
+			</File>
+			<File
 				RelativePath="..\..\src\include\switch.h"
 				>
 			</File>
@@ -974,6 +1034,10 @@
 			</File>
 			<File
 				RelativePath="..\..\src\include\switch_odbc.h"
+				>
+			</File>
+			<File
+				RelativePath="..\..\src\include\switch_pgsql.h"
 				>
 			</File>
 			<File
