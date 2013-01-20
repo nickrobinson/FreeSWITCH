@@ -519,6 +519,10 @@ switch_status_t sofia_on_hangup(switch_core_session_t *session)
 		switch_core_session_rwunlock(a_session);
 	}
 
+       if (switch_true(switch_channel_get_variable(channel, "channel_is_moving"))) {
+               goto done;
+       }
+
 	if (sofia_test_pflag(tech_pvt->profile, PFLAG_DESTROY)) {
 		sofia_set_flag(tech_pvt, TFLAG_BYE);
 	} else if (tech_pvt->nh && !sofia_test_flag(tech_pvt, TFLAG_BYE)) {
@@ -670,6 +674,8 @@ switch_status_t sofia_on_hangup(switch_core_session_t *session)
 
 
 	sofia_glue_set_rtp_stats(tech_pvt);
+
+done:
 
 	switch_mutex_unlock(tech_pvt->sofia_mutex);
 
