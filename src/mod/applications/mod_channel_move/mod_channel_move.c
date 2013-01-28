@@ -63,19 +63,21 @@ static int silent_destroy(char *technology, char *channel_id)
 		return SWITCH_FALSE;
 	}
 
-	switch_channel_set_variable(channel, "channel_is_moving", "true");
-	switch_channel_set_variable(channel, "reset_local_network_on_recovery", "true");
-	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Move Channel: Generating XML metadata...\n");
-
 	if (!switch_channel_test_flag(channel, CF_ANSWERED) || switch_channel_get_state(channel) < CS_SOFT_EXECUTE) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Move Channel: This channel is not in an answered state. You can only move answered channels.\n");
 		switch_core_session_rwunlock(session);
 		return SWITCH_FALSE;
 	}
 
 	if (switch_channel_test_flag(channel, CF_RECOVERING) || !switch_channel_test_flag(channel, CF_TRACKABLE)) {
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Move Channel: This channel is not tracked. Please make sure your endpoint has call tracking enabled.\n");
 		switch_core_session_rwunlock(session);
 		return SWITCH_FALSE;
 	}
+
+	switch_channel_set_variable(channel, "channel_is_moving", "true");
+	switch_channel_set_variable(channel, "reset_local_network_on_recovery", "true");
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Move Channel: Generating XML metadata...\n");
 
 	if (switch_ivr_generate_xml_cdr(session, &cdr) == SWITCH_STATUS_SUCCESS) {
 		xml_cdr_text = switch_xml_toxml_nolock(cdr, SWITCH_FALSE);
