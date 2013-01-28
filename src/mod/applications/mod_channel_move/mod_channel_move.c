@@ -64,6 +64,7 @@ static int silent_destroy(char *technology, char *channel_id)
 	}
 
 	switch_channel_set_variable(channel, "channel_is_moving", "true");
+	switch_channel_set_variable(channel, "reset_local_network_on_recovery", "true");
 	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Move Channel: Generating XML metadata...\n");
 
 	if (!switch_channel_test_flag(channel, CF_ANSWERED) || switch_channel_get_state(channel) < CS_SOFT_EXECUTE) {
@@ -118,6 +119,8 @@ static int recover_callback(char *technology, char *xml_str)
 		return SWITCH_FALSE;
 	}
 
+	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "%s\n", xml_str);
+
 	if (!(ep = switch_loadable_module_get_endpoint_interface(technology))) {
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Move Channel: EP ERROR\n");
 		return SWITCH_FALSE;
@@ -130,7 +133,6 @@ static int recover_callback(char *technology, char *xml_str)
 
 	if (ep->recover_callback) {
 		switch_caller_extension_t *extension = NULL;
-
 
 		if (ep->recover_callback(session) > 0) {
 			switch_channel_t *channel = switch_core_session_get_channel(session);
