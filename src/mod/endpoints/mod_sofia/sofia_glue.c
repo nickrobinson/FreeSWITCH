@@ -5977,7 +5977,7 @@ int sofia_recover_callback(switch_core_session_t *session)
 			
 			sofia_glue_tech_set_codec(tech_pvt, 1);
 
-			if (switch_channel_get_variable(channel, "reset_local_network_on_recovery")) {
+			if (switch_true(switch_channel_get_variable(channel, "reset_local_network_on_recovery"))) {
 			        if (sofia_glue_tech_choose_port(tech_pvt, 0) != SWITCH_STATUS_SUCCESS) {
 			                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(tech_pvt->session), SWITCH_LOG_ERROR, "Port Error!\n");
 			                return 0;
@@ -5992,9 +5992,10 @@ int sofia_recover_callback(switch_core_session_t *session)
 					tech_pvt->rtpip = tech_pvt->local_sdp_audio_ip;
 				}
 
-				if (!zstr(a_ip)) {
-					tech_pvt->adv_sdp_audio_ip = switch_core_session_strdup(session, a_ip);
-				}
+			}
+
+			if (!zstr(a_ip)) {
+				tech_pvt->adv_sdp_audio_ip = switch_core_session_strdup(session, a_ip);
 			}
 
 			if (r_ip && r_port) {
