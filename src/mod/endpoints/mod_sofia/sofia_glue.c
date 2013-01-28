@@ -5956,16 +5956,24 @@ int sofia_recover_callback(switch_core_session_t *session)
 			
 			sofia_glue_tech_set_codec(tech_pvt, 1);
 
-			tech_pvt->adv_sdp_audio_ip = tech_pvt->extrtpip = (char *) ip;
-			tech_pvt->adv_sdp_audio_port = tech_pvt->local_sdp_audio_port = (switch_port_t)atoi(port);
+			if (switch_channel_get_variable(channel, "reset_local_network_on_recovery")) {
+			        if (sofia_glue_tech_choose_port(tech_pvt, 0) != SWITCH_STATUS_SUCCESS) {
+			                switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(tech_pvt->session), SWITCH_LOG_ERROR, "Port Error!\n");
+			                return 0;
+		        	}
+			} else {
 
-			if (!zstr(ip)) {
-				tech_pvt->local_sdp_audio_ip = switch_core_session_strdup(session, ip);
-				tech_pvt->rtpip = tech_pvt->local_sdp_audio_ip;
-			}
+				tech_pvt->adv_sdp_audio_ip = tech_pvt->extrtpip = (char *) ip;
+				tech_pvt->adv_sdp_audio_port = tech_pvt->local_sdp_audio_port = (switch_port_t)atoi(port);
 
-			if (!zstr(a_ip)) {
-				tech_pvt->adv_sdp_audio_ip = switch_core_session_strdup(session, a_ip);
+				if (!zstr(ip)) {
+					tech_pvt->local_sdp_audio_ip = switch_core_session_strdup(session, ip);
+					tech_pvt->rtpip = tech_pvt->local_sdp_audio_ip;
+				}
+
+				if (!zstr(a_ip)) {
+					tech_pvt->adv_sdp_audio_ip = switch_core_session_strdup(session, a_ip);
+				}
 			}
 
 			if (r_ip && r_port) {
@@ -5982,13 +5990,6 @@ int sofia_recover_callback(switch_core_session_t *session)
 				tech_pvt->video_rm_encoding = (char *) switch_channel_get_variable(channel, "sip_use_video_codec_name");
 				tech_pvt->video_rm_fmtp = (char *) switch_channel_get_variable(channel, "sip_use_video_codec_fmtp");
 
-				ip = switch_channel_get_variable(channel, SWITCH_LOCAL_VIDEO_IP_VARIABLE);
-				port = switch_channel_get_variable(channel, SWITCH_LOCAL_VIDEO_PORT_VARIABLE);
-				r_ip = switch_channel_get_variable(channel, SWITCH_REMOTE_VIDEO_IP_VARIABLE);
-				r_port = switch_channel_get_variable(channel, SWITCH_REMOTE_VIDEO_PORT_VARIABLE);
-
-				sofia_set_flag(tech_pvt, TFLAG_VIDEO);
-
 				if ((tmp = switch_channel_get_variable(channel, "sip_use_video_codec_rate"))) {
 					tech_pvt->video_rm_rate = atoi(tmp);
 				}
@@ -5997,13 +5998,25 @@ int sofia_recover_callback(switch_core_session_t *session)
 					tech_pvt->video_codec_ms = atoi(tmp);
 				}
 
-				tech_pvt->adv_sdp_video_port = tech_pvt->local_sdp_video_port = (switch_port_t)atoi(port);
+				if (switch_channel_get_variable(channel, "reset_local_network_on_recovery")) {
+					sofia_glue_tech_choose_video_port(tech_pvt, 0);
+				} else {
+					ip = switch_channel_get_variable(channel, SWITCH_LOCAL_VIDEO_IP_VARIABLE);
+					port = switch_channel_get_variable(channel, SWITCH_LOCAL_VIDEO_PORT_VARIABLE);
+					tech_pvt->adv_sdp_video_port = tech_pvt->local_sdp_video_port = (switch_port_t)atoi(port);
+				}
+
+				r_ip = switch_channel_get_variable(channel, SWITCH_REMOTE_VIDEO_IP_VARIABLE);
+				r_port = switch_channel_get_variable(channel, SWITCH_REMOTE_VIDEO_PORT_VARIABLE);
 
 				if (r_ip && r_port) {
 					tech_pvt->remote_sdp_video_ip = (char *) r_ip;
 					tech_pvt->remote_sdp_video_port = (switch_port_t)atoi(r_port);
 				}
-				//sofia_glue_tech_set_video_codec(tech_pvt, 1);
+
+				sofia_set_flag(tech_pvt, TFLAG_VIDEO);
+
+				sofia_glue_tech_set_video_codec(tech_pvt, 1);
 			}
 
 			sofia_glue_set_local_sdp(tech_pvt, NULL, 0, NULL, 1);
