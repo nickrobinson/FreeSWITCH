@@ -109,12 +109,12 @@ static int silent_destroy(char *technology, char *channel_id)
 }
 
 
-static int recover_callback(char *technology, char *xml_str)
+static char *recover_callback(char *technology, char *xml_str)
 {
 	switch_xml_t xml;
 	switch_endpoint_interface_t *ep;
 	switch_core_session_t *session;
-	int r = SWITCH_FALSE;
+	char *r = NULL;
 
 	if (!(xml = switch_xml_parse_str_dynamic(xml_str, SWITCH_TRUE))) {
 		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "XML ERROR\n");
@@ -168,7 +168,7 @@ static int recover_callback(char *technology, char *xml_str)
 
 			switch_core_session_thread_launch(session);
 
-			r = SWITCH_TRUE;
+			r = switch_channel_get_uuid(channel);
 		}
 
 	} else {
@@ -204,17 +204,17 @@ SWITCH_DECLARE(void) channel_move_event_handler(switch_event_t *event)
 
 	if (!zstr(technology) && !zstr(metadata)) {
 		 switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Move Channel: Attempting to recreate previously destroyed channel\n");
-		 if (recover_callback(technology, metadata) == SWITCH_TRUE) {
+		 if ((channel_id = recover_callback(technology, metadata))) {
 
 			/* Tell the world that the channel has moved! */
 			if (switch_event_create_subclass(&completion_event, SWITCH_EVENT_CUSTOM, MY_EVENT_MOVE_COMPLETE) == SWITCH_STATUS_SUCCESS) {
 //				switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "profile_name", h->profile->name);
 //				switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "old_node_hostname", mod_sofia_globals.hostname);
-				switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "old_node_channel_uuid", channel_id);
+				switch_event_add_header_string(completion_event, SWITCH_STACK_BOTTOM, "old_node_channel_uuid", channel_id);
 				switch_event_fire(&completion_event);
 			}
 
-			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Move Channel: Channel is restored on new server!\n");
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Move Channel: Channel is restored on new server as %s!\n", channel_id);
 		} else {
 			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Move Channel: Channel restore failed...\n");
 		}
@@ -227,7 +227,7 @@ SWITCH_DECLARE(void) channel_move_event_handler(switch_event_t *event)
 		if (silent_destroy(technology, channel_id) == SWITCH_TRUE) {
 			/* Tell the world about the channel, hoping that the call shall resume */
 			if (switch_event_create_subclass(&completion_event, SWITCH_EVENT_CUSTOM, MY_EVENT_MOVE_COMPLETE) == SWITCH_STATUS_SUCCESS) {
-				switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "old_node_channel_uuid", channel_id);
+				switch_event_add_header_string(completion_event, SWITCH_STACK_BOTTOM, "old_node_channel_uuid", channel_id);
 				switch_event_fire(&completion_event);
 			}
 
