@@ -208,9 +208,9 @@ SWITCH_DECLARE(void) channel_move_event_handler(switch_event_t *event)
 
 			/* Tell the world that the channel has moved! */
 			if (switch_event_create_subclass(&completion_event, SWITCH_EVENT_CUSTOM, MY_EVENT_MOVE_COMPLETE) == SWITCH_STATUS_SUCCESS) {
-//			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "profile_name", h->profile->name);
-//			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "old_node_hostname", mod_sofia_globals.hostname);
-//			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "old_node_channel_uuid", switch_core_session_get_uuid(session));
+//				switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "profile_name", h->profile->name);
+//				switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "old_node_hostname", mod_sofia_globals.hostname);
+				switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "old_node_channel_uuid", channel_id);
 				switch_event_fire(&completion_event);
 			}
 
@@ -227,7 +227,7 @@ SWITCH_DECLARE(void) channel_move_event_handler(switch_event_t *event)
 		if (silent_destroy(technology, channel_id) == SWITCH_TRUE) {
 			/* Tell the world about the channel, hoping that the call shall resume */
 			if (switch_event_create_subclass(&completion_event, SWITCH_EVENT_CUSTOM, MY_EVENT_MOVE_COMPLETE) == SWITCH_STATUS_SUCCESS) {
-//				switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "old_node_channel_uuid", switch_channel_get_uuid(channel));
+				switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "old_node_channel_uuid", channel_id);
 				switch_event_fire(&completion_event);
 			}
 
