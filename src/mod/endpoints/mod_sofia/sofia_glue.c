@@ -5992,10 +5992,9 @@ int sofia_recover_callback(switch_core_session_t *session)
 					tech_pvt->rtpip = tech_pvt->local_sdp_audio_ip;
 				}
 
-			}
-
-			if (!zstr(a_ip)) {
-				tech_pvt->adv_sdp_audio_ip = switch_core_session_strdup(session, a_ip);
+				if (!zstr(a_ip)) {
+					tech_pvt->adv_sdp_audio_ip = switch_core_session_strdup(session, a_ip);
+				}
 			}
 
 			if (r_ip && r_port) {
