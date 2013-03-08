@@ -327,7 +327,7 @@ static void *SWITCH_THREAD_FUNC erl_to_fs_loop(switch_thread_t *thread, void *ob
 		ei_x_new_with_version(&rbuf);
 
 		/* wait for a erlang message, or timeout after 100ms to check if the module is still running */
-		status = ei_xreceive_msg_tmo(listener->clientfd, &msg, &buf, 250);
+		status = ei_xreceive_msg_tmo(listener->clientfd, &msg, &buf, 50);
 
 		switch (status) {
 			case ERL_TICK:

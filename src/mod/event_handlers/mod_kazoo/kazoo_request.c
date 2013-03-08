@@ -756,7 +756,7 @@ static switch_status_t handle_net_kernel_request(listener_t *listener, erlang_ms
 
     ei_helper_send(listener, &pid, rbuf);
 
-    return SWITCH_STATUS_NOOP;
+    return SWITCH_STATUS_SUCCESS;
 }
 
 static switch_status_t handle_tuple_request(listener_t *listener, erlang_msg * msg, ei_x_buff * buf, ei_x_buff * rbuf) {
