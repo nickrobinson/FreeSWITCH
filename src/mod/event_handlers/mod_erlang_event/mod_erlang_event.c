@@ -100,35 +100,28 @@ static void remove_binding(listener_t *listener, erlang_pid * pid)
 
 	switch_xml_set_binding_sections(bindings.search_binding, SWITCH_XML_SECTION_MAX);
 
-        for (ptr = bindings.head; ptr; lst = ptr, ptr = ptr->next) {
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Hunting for a binding\n");
-                if ((listener && ptr->listener == listener) || (pid && (ptr->process.type == ERLANG_PID) && !ei_compare_pids(&ptr->process.pid, pid))) {
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Target acquired - found binding\n");
-                        if (bindings.head == ptr) {
-                                if (ptr->next) {
-                                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removing binding at the head\n");
-                                        bindings.head = ptr->next;
-                                } else {
-                                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removed all (only?) binding\n");
-                                        bindings.head = NULL;
-                                        break;
-                                }
-                        } else {
-                                if (ptr->next) {
-                                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removing binding in the middle\n");
-                                        lst->next = ptr->next;
-                                        ptr = lst;
-                                } else {
-                                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removing binding at the end\n");
-                                        lst->next = NULL;
-                                }
-                        }
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removed binding\n");
-                } else {
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "These are the not the bindings you are looking for...\n");
-                        switch_xml_set_binding_sections(bindings.search_binding, switch_xml_get_binding_sections(bindings.search_binding) | ptr->section);
-                }
-        }
+	for (ptr = bindings.head; ptr; lst = ptr, ptr = ptr->next) {
+		if ((listener && ptr->listener == listener) || (pid && (ptr->process.type == ERLANG_PID) && !ei_compare_pids(&ptr->process.pid, pid))) {
+			if (bindings.head == ptr) {
+				if (ptr->next) {
+					bindings.head = ptr->next;
+				} else {
+					switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removed all (only?) binding\n");
+					bindings.head = NULL;
+					break;
+				}
+			} else {
+				if (ptr->next) {
+					lst->next = ptr->next;
+				} else {
+					lst->next = NULL;
+				}
+			}
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removed binding\n");
+		} else {
+			switch_xml_set_binding_sections(bindings.search_binding, switch_xml_get_binding_sections(bindings.search_binding) | ptr->section);
+		}
+	}
 
 	switch_thread_rwlock_unlock(globals.bindings_rwlock);
 }
@@ -281,39 +274,19 @@ static void add_listener(listener_t *listener)
 
 static void remove_listener(listener_t *listener)
 {
-	listener_t *ptr, *lst = NULL;
+	listener_t *l, *last = NULL;
 
 	switch_thread_rwlock_wrlock(globals.listener_rwlock);
-	
-	for (ptr = listen_list.listeners; ptr; lst = ptr, ptr = ptr->next) {
-                switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Hunting for a listener\n");
-                if (listener && ptr == listener) {
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Target acquired - found listener\n");
-                        if (listen_list.listeners == ptr) {
-                                if (ptr->next) {
-                                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removing listener at the head\n");
-                                        listen_list.listeners = ptr->next;
-                                } else {
-                                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removed all (only?) listener\n");
-                                        listen_list.listeners = NULL;
-                                        break;
-                                }
-                        } else {
-                                if (ptr->next) {
-                                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removing listener in the middle\n");
-                                        lst->next = ptr->next;
-                                        ptr = lst;
-                                } else {
-                                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removing listener at the end\n");
-                                        lst->next = NULL;
-                                }
-                        }
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "Removed listener\n");
-                } else {
-                        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "These are the not the listeners you are looking for...\n");
-                }
-        }
-        
+	for (l = listen_list.listeners; l; l = l->next) {
+		if (l == listener) {
+			if (last) {
+				last->next = l->next;
+			} else {
+				listen_list.listeners = l->next;
+			}
+		}
+		last = l;
+	}
 	switch_thread_rwlock_unlock(globals.listener_rwlock);
 }
 
@@ -443,9 +416,19 @@ static switch_xml_t erlang_fetch(const char *sectionstr, const char *tag_name, c
 	switch_thread_rwlock_rdlock(globals.listener_rwlock);
 
 	for (ptr = bindings.head; ptr; ptr = ptr->next) {
+		/* If we got listener_rwlock while a listner thread was dying after removing the listener
+		   from listener_list but before locking for the bindings removal (now pending our lock) check
+		   if it already closed the socket.  Our listener pointer should still be good (pointed at an orphan
+		   listener) until it is removed from the binding...*/
+		if (!ptr->listener) {
+			continue;
+		}
+
 		if (ptr->section != section) {
 			continue;
 		}
+
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "binding for %s in section %s with key %s and value %s requested from node %s\n", tag_name, sectionstr, key_name, key_value, ptr->process.pid.node);
 
 		if (params) {
 			ei_encode_switch_event_headers(&buf, params);
@@ -465,15 +448,14 @@ static switch_xml_t erlang_fetch(const char *sectionstr, const char *tag_name, c
 			p->state = reply_waiting;
 			now = switch_micro_time_now();
 		}
+		/* We don't need to lock here because everybody is waiting
+		   on our condition before the action starts. */
 
-        if (ptr->listener) {
-    		switch_mutex_lock(ptr->listener->sock_mutex);
- 	    	if (ptr->listener->sockfd) {
-		        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG, "binding for %s in section %s with key %s and value %s requested from node %s\n", tag_name, sectionstr, key_name, key_value, ptr->process.pid.node);
-			    ei_sendto(ptr->listener->ec, ptr->listener->sockfd, &ptr->process, &buf);
-	    	}   
-		    switch_mutex_unlock(ptr->listener->sock_mutex);
-        }
+		switch_mutex_lock(ptr->listener->sock_mutex);
+ 		if (ptr->listener->sockfd) {
+			ei_sendto(ptr->listener->ec, ptr->listener->sockfd, &ptr->process, &buf);
+		}
+		switch_mutex_unlock(ptr->listener->sock_mutex);
 	}
 
 	switch_thread_rwlock_unlock(globals.bindings_rwlock);
@@ -873,7 +855,7 @@ static void listener_main_loop(listener_t *listener)
 
 		/* do we need the mutex when reading? */
 		/*switch_mutex_lock(listener->sock_mutex); */
-		status = ei_xreceive_msg_tmo(listener->sockfd, &msg, &buf, 100);
+		status = ei_xreceive_msg_tmo(listener->sockfd, &msg, &buf, 10);
 		/*switch_mutex_unlock(listener->sock_mutex); */
 
 		switch (status) {
