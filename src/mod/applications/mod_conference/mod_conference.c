@@ -3109,6 +3109,24 @@ static void *SWITCH_THREAD_FUNC conference_loop_input(switch_thread_t *thread, v
 			break;
 		}
 
+
+		/* if we have caller digits, feed them to the parser to find an action */
+		if (switch_channel_has_dtmf(channel)) {
+			char dtmf[128] = "";
+		
+			switch_channel_dequeue_dtmf_string(channel, dtmf, sizeof(dtmf));
+
+			if (switch_test_flag(member, MFLAG_DIST_DTMF)) {
+				conference_send_all_dtmf(member, member->conference, dtmf);
+			} else if (member->dmachine) {
+				switch_ivr_dmachine_feed(member->dmachine, dtmf, NULL);
+			}
+		} else if (member->dmachine) {
+			switch_ivr_dmachine_ping(member->dmachine, NULL);
+		}
+
+
+
 		if (switch_test_flag(read_frame, SFF_CNG)) {
 			if (member->conference->agc_level) {
 				member->nt_tally++;
@@ -3582,7 +3600,6 @@ static void conference_loop_output(conference_member_t *member)
 	/* you better not block this thread loop for more than the duration of member->conference->timer_name!  */
 	while (switch_test_flag(member, MFLAG_RUNNING) && switch_test_flag(member, MFLAG_ITHREAD)
 		   && switch_channel_ready(channel)) {
-		char dtmf[128] = "";
 		switch_event_t *event;
 		int use_timer = 0;
 		switch_buffer_t *use_buffer = NULL;
@@ -3626,19 +3643,6 @@ static void conference_loop_output(conference_member_t *member)
 			}
 		}
 
-		/* if we have caller digits, feed them to the parser to find an action */
-		if (switch_channel_has_dtmf(channel)) {
-			switch_channel_dequeue_dtmf_string(channel, dtmf, sizeof(dtmf));
-
-			if (switch_test_flag(member, MFLAG_DIST_DTMF)) {
-				conference_send_all_dtmf(member, member->conference, dtmf);
-			} else if (member->dmachine) {
-				switch_ivr_dmachine_feed(member->dmachine, dtmf, NULL);
-			}
-		} else if (member->dmachine) {
-			switch_ivr_dmachine_ping(member->dmachine, NULL);
-		}
-
 		use_buffer = NULL;
 		mux_used = (uint32_t) switch_buffer_inuse(member->mux_buffer);
 		
@@ -3680,7 +3684,6 @@ static void conference_loop_output(conference_member_t *member)
 						member_add_file_data(member, write_frame.data, write_frame.datalen);
 					}
 					if (switch_core_session_write_frame(member->session, &write_frame, SWITCH_IO_FLAG_NONE, 0) != SWITCH_STATUS_SUCCESS) {
-						switch_channel_hangup(channel, SWITCH_CAUSE_DESTINATION_OUT_OF_ORDER);
 						switch_mutex_unlock(member->audio_out_mutex);
 						break;
 					}
@@ -5233,9 +5236,15 @@ static switch_status_t conf_api_sub_enforce_floor(conference_member_t *member, s
 
 static switch_xml_t add_x_tag(switch_xml_t x_member, const char *name, const char *value, int off)
 {
-	switch_size_t dlen = strlen(value) * 3 + 1;
+	switch_size_t dlen;
 	char *data;
 	switch_xml_t x_tag;
+
+	if (!value) {
+		return 0;
+	}
+
+	dlen = strlen(value) * 3 + 1;
 
 	x_tag = switch_xml_add_child_d(x_member, name, off);
 	switch_assert(x_tag);

@@ -662,11 +662,13 @@ static switch_status_t handle_msg_api(listener_t *listener, erlang_msg * msg, in
 	}
 }
 
+#define ARGLEN 2048
 static switch_status_t handle_msg_bgapi(listener_t *listener, erlang_msg * msg, int arity, ei_x_buff * buf, ei_x_buff * rbuf)
 {
 	char api_cmd[MAXATOMLEN];
-	char arg[2048];
-	if (arity < 3 || ei_decode_atom(buf->buff, &buf->index, api_cmd) || ei_decode_string_or_binary(buf->buff, &buf->index, 2047, arg)) {
+	char arg[ARGLEN];
+
+	if (arity < 3 || ei_decode_atom(buf->buff, &buf->index, api_cmd) || ei_decode_string_or_binary(buf->buff, &buf->index, ARGLEN - 1, arg)) {
 		ei_x_encode_tuple_header(rbuf, 2);
 		ei_x_encode_atom(rbuf, "error");
 		ei_x_encode_atom(rbuf, "badarg");
@@ -1196,6 +1198,7 @@ static switch_status_t handle_ref_tuple(listener_t *listener, erlang_msg * msg, 
 			se->spawn_reply->pid = switch_core_alloc(se->pool, sizeof(erlang_pid));
 			switch_assert(se->spawn_reply->pid != NULL);
 			memcpy(se->spawn_reply->pid, &pid, sizeof(erlang_pid));
+
 			switch_thread_cond_signal(se->spawn_reply->ready_or_found);
 
 			switch_mutex_unlock(se->spawn_reply->mutex);

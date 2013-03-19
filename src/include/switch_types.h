@@ -138,6 +138,7 @@ SWITCH_BEGIN_EXTERN_C
 #define SWITCH_PROTO_SPECIFIC_HANGUP_CAUSE_VARIABLE "proto_specific_hangup_cause"
 #define SWITCH_TRANSFER_HISTORY_VARIABLE "transfer_history"
 #define SWITCH_TRANSFER_SOURCE_VARIABLE "transfer_source"
+#define SWITCH_SENSITIVE_DTMF_VARIABLE "sensitive_dtmf"
 
 #define SWITCH_CHANNEL_EXECUTE_ON_ANSWER_VARIABLE "execute_on_answer"
 #define SWITCH_CHANNEL_EXECUTE_ON_PRE_ANSWER_VARIABLE "execute_on_pre_answer"
@@ -246,7 +247,8 @@ typedef enum {
 
 
 typedef enum {
-	DTMF_FLAG_SKIP_PROCESS = (1 << 0)
+	DTMF_FLAG_SKIP_PROCESS = (1 << 0),
+	DTMF_FLAG_SENSITIVE = (1 << 1)
 } dtmf_flag_t;
 
 typedef struct {
@@ -443,6 +445,8 @@ typedef enum {
 	SWITCH_ABC_TYPE_WRITE_REPLACE,
 	SWITCH_ABC_TYPE_READ_REPLACE,
 	SWITCH_ABC_TYPE_READ_PING,
+	SWITCH_ABC_TYPE_TAP_NATIVE_READ,
+	SWITCH_ABC_TYPE_TAP_NATIVE_WRITE,
 	SWITCH_ABC_TYPE_CLOSE
 } switch_abc_type_t;
 
@@ -736,12 +740,17 @@ typedef enum {
 
 	 */
 
-	RTP_BUG_CHANGE_SSRC_ON_MARKER = (1 << 9)
+	RTP_BUG_CHANGE_SSRC_ON_MARKER = (1 << 9),
 
 	/*
 	  By default FS will change the SSRC when the marker is set and it detects a timestamp reset.
 	  If this setting is enabled it will NOT do this (old behaviour).
 	 */
+
+	RTP_BUG_FLUSH_JB_ON_DTMF = (1 << 10)
+	
+	/* FLUSH JITTERBUFFER When getting RFC2833 to reduce bleed through */
+
 
 } switch_rtp_bug_flag_t;
 
@@ -762,6 +771,11 @@ typedef struct {
 	unsigned ssrc:32;			/* synchronization source */
 } switch_rtp_hdr_t;
 
+typedef struct {
+	unsigned length:16;			/* length                 */
+	unsigned profile:16;		/* defined by profile     */
+} switch_rtp_hdr_ext_t;
+
 #else /*  BIG_ENDIAN */
 
 typedef struct {
@@ -775,6 +789,11 @@ typedef struct {
 	unsigned ts:32;				/* timestamp              */
 	unsigned ssrc:32;			/* synchronization source */
 } switch_rtp_hdr_t;
+
+typedef struct {
+	unsigned profile:16;		/* defined by profile     */
+	unsigned length:16;			/* length                 */
+} switch_rtp_hdr_ext_t;
 
 #endif
 
@@ -1463,7 +1482,8 @@ SMBF_WRITE_STREAM - Include the Write Stream
 SMBF_WRITE_REPLACE - Replace the Write Stream
 SMBF_READ_REPLACE - Replace the Read Stream
 SMBF_STEREO - Record in stereo
-SMBF_ANSWER_RECORD_REQ - Don't record until the channel is answered
+SMBF_ANSWER_REQ - Don't record until the channel is answered
+SMBF_BRIDGE_REQ - Don't record until the channel is bridged
 SMBF_THREAD_LOCK - Only let the same thread who created the bug remove it.
 SMBF_PRUNE - 
 SMBF_NO_PAUSE - 
@@ -1479,11 +1499,14 @@ typedef enum {
 	SMBF_READ_PING = (1 << 4),
 	SMBF_STEREO = (1 << 5),
 	SMBF_ANSWER_REQ = (1 << 6),
-	SMBF_THREAD_LOCK = (1 << 7),
-	SMBF_PRUNE = (1 << 8),
-	SMBF_NO_PAUSE = (1 << 9),
-	SMBF_STEREO_SWAP = (1 << 10),
-	SMBF_LOCK = (1 << 11)
+	SMBF_BRIDGE_REQ = (1 << 7),
+	SMBF_THREAD_LOCK = (1 << 8),
+	SMBF_PRUNE = (1 << 9),
+	SMBF_NO_PAUSE = (1 << 10),
+	SMBF_STEREO_SWAP = (1 << 11),
+	SMBF_LOCK = (1 << 12),
+	SMBF_TAP_NATIVE_READ = (1 << 13),
+	SMBF_TAP_NATIVE_WRITE = (1 << 14)
 } switch_media_bug_flag_enum_t;
 typedef uint32_t switch_media_bug_flag_t;
 
@@ -1522,7 +1545,8 @@ typedef enum {
 	SWITCH_FILE_DONE = (1 << 13),
 	SWITCH_FILE_BUFFER_DONE = (1 << 14),
 	SWITCH_FILE_WRITE_APPEND = (1 << 15),
-	SWITCH_FILE_WRITE_OVER = (1 << 16)
+	SWITCH_FILE_WRITE_OVER = (1 << 16),
+	SWITCH_FILE_NOMUX = (1 << 17)
 } switch_file_flag_enum_t;
 typedef uint32_t switch_file_flag_t;
 
@@ -1972,6 +1996,19 @@ struct switch_ivr_dmachine_match {
 typedef struct switch_ivr_dmachine_match switch_ivr_dmachine_match_t;
 typedef switch_status_t (*switch_ivr_dmachine_callback_t) (switch_ivr_dmachine_match_t *match);
 
+#define MAX_ARG_RECURSION 25
+
+#define arg_recursion_check_start(_args) if (_args) {					\
+		if (_args->loops >= MAX_ARG_RECURSION) {						\
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR,		\
+							  "RECURSION ERROR!  It's not the best idea to call things that collect input recursively from an input callback.\n"); \
+			return SWITCH_STATUS_GENERR;								\
+		} else {_args->loops++;}										\
+	}
+
+
+#define arg_recursion_check_stop(_args) if (_args) _args->loops--
+
 typedef struct {
 	switch_input_callback_function_t input_callback;
 	void *buf;
@@ -1979,6 +2016,7 @@ typedef struct {
 	switch_read_frame_callback_function_t read_frame_callback;
 	void *user_data;
 	switch_ivr_dmachine_t *dmachine;
+	int loops;
 } switch_input_args_t;
 
 

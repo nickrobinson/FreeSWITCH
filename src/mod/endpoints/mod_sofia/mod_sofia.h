@@ -199,6 +199,7 @@ typedef enum {
 
 typedef enum {
 	PFLAG_AUTH_CALLS,
+	PFLAG_AUTH_MESSAGES,
 	PFLAG_BLIND_REG,
 	PFLAG_AUTH_ALL,
 	PFLAG_FULL_ID,
@@ -354,7 +355,6 @@ typedef enum {
 	TFLAG_PASS_ACK,
 	TFLAG_CRYPTO_RECOVER,
 	TFLAG_DROP_DTMF,
-	TFLAG_SIGDEAD,
 	/* No new flags below this line */
 	TFLAG_MAX
 } TFLAGS;
@@ -392,6 +392,8 @@ struct mod_sofia_globals {
 	char *capture_server;	
 	int rewrite_multicasted_fs_path;
 	int presence_flush;
+	switch_thread_t *presence_thread;
+	uint32_t max_reg_threads;
 };
 extern struct mod_sofia_globals mod_sofia_globals;
 
@@ -624,6 +626,7 @@ struct sofia_profile {
 	switch_payload_t cng_pt;
 	uint32_t codec_flags;
 	switch_mutex_t *ireg_mutex;
+	switch_mutex_t *dbh_mutex;
 	switch_mutex_t *gateway_mutex;
 	sofia_gateway_t *gateways;
 	//su_home_t *home;
@@ -699,6 +702,7 @@ struct sofia_profile {
 	sofia_paid_type_t paid_type;
 	uint32_t rtp_digit_delay;
 	switch_queue_t *event_queue;
+	switch_thread_t *thread;		
 };
 
 struct private_object {
@@ -1043,7 +1047,7 @@ void sofia_presence_set_hash_key(char *hash_key, int32_t len, sip_t const *sip);
 void sofia_glue_sql_close(sofia_profile_t *profile, time_t prune);
 int sofia_glue_init_sql(sofia_profile_t *profile);
 char *sofia_overcome_sip_uri_weakness(switch_core_session_t *session, const char *uri, const sofia_transport_t transport, switch_bool_t uri_only,
-									  const char *params);
+									  const char *params, const char *invite_tel_params);
 switch_bool_t sofia_glue_execute_sql_callback(sofia_profile_t *profile, switch_mutex_t *mutex, char *sql, switch_core_db_callback_func_t callback,
 											  void *pdata);
 char *sofia_glue_execute_sql2str(sofia_profile_t *profile, switch_mutex_t *mutex, char *sql, char *resbuf, size_t len);
@@ -1144,7 +1148,7 @@ int sofia_glue_toggle_hold(private_object_t *tech_pvt, int sendonly);
 const char *sofia_state_string(int state);
 switch_status_t sofia_glue_tech_set_codec(private_object_t *tech_pvt, int force);
 void sofia_wait_for_reply(struct private_object *tech_pvt, nua_event_t event, uint32_t timeout);
-void sofia_glue_set_image_sdp(private_object_t *tech_pvt, switch_t38_options_t *t38_options, int insist);
+void sofia_glue_set_udptl_image_sdp(private_object_t *tech_pvt, switch_t38_options_t *t38_options, int insist);
 
 /* 
  * Logging control functions
