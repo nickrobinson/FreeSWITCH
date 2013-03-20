@@ -5926,6 +5926,7 @@ SWITCH_MODULE_SHUTDOWN_FUNCTION(mod_sofia_shutdown)
 	switch_mutex_unlock(mod_sofia_globals.mutex);
 
 	switch_event_unbind_callback(sofia_presence_event_handler);
+
 	switch_event_unbind_callback(general_event_handler);
 	switch_event_unbind_callback(event_handler);
 

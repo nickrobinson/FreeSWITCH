@@ -6859,7 +6859,7 @@ void sofia_handle_sip_i_refer(nua_t *nua, sofia_profile_t *profile, nua_handle_t
 
 							if (switch_true(switch_channel_get_variable(channel_b, "recording_follow_transfer")) && 
 								(tmp = switch_core_session_locate(br_b))) {
-                                switch_core_media_bug_transfer_recordings(b_session, tmp);
+								switch_core_media_bug_transfer_recordings(b_session, tmp);
 								switch_core_session_rwunlock(tmp);
 							}
 
