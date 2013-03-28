@@ -1128,22 +1128,6 @@ Requires:        %{name} = %{version}-%{release}
 %description lang-he
 Hebrew language phrases module and directory structure for say module and voicemail
 
-%package lang-es
-Summary:        Provides Spanish language dependend modules and speech config for the FreeSWITCH Open Source telephone platform.
-Group:          System/Libraries
-Requires:        %{name} = %{version}-%{release}
-
-%description lang-es
-Spanish language phrases module and directory structure for say module and voicemail
-
-%package lang-pt
-Summary:        Provides Portugese language dependend modules and speech config for the FreeSWITCH Open Source telephone platform.
-Group:          System/Libraries
-Requires:        %{name} = %{version}-%{release}
-
-%description lang-pt
-Hebrew language phrases module and directory structure for say module and voicemail
-
 ######################################################################################################################
 #				FreeSWITCH Timer Modules
 ######################################################################################################################
@@ -2326,30 +2310,6 @@ fi
 %config(noreplace) %attr(0640, freeswitch, daemon) %{sysconfdir}/lang/he/vm/*.xml
 %config(noreplace) %attr(0640, freeswitch, daemon) %{sysconfdir}/lang/he/dir/*.xml
 %{MODINSTDIR}/mod_say_he.so*
-
-%files lang-es
-%defattr(-, freeswitch, daemon)
-%dir %attr(0750, freeswitch, daemon) %{sysconfdir}/lang/es
-%dir %attr(0750, freeswitch, daemon) %{sysconfdir}/lang/es/demo
-%dir %attr(0750, freeswitch, daemon) %{sysconfdir}/lang/es/vm
-%dir %attr(0750, freeswitch, daemon) %{sysconfdir}/lang/es/dir
-%config(noreplace) %attr(0640, freeswitch, daemon) %{sysconfdir}/lang/es/*.xml
-%config(noreplace) %attr(0640, freeswitch, daemon) %{sysconfdir}/lang/es/demo/*.xml
-%config(noreplace) %attr(0640, freeswitch, daemon) %{sysconfdir}/lang/es/vm/*.xml
-%config(noreplace) %attr(0640, freeswitch, daemon) %{sysconfdir}/lang/es/dir/*.xml
-%{MODINSTDIR}/mod_say_en.so*
-
-%files lang-pt
-%defattr(-, freeswitch, daemon)
-%dir %attr(0750, freeswitch, daemon) %{sysconfdir}/lang/pt
-%dir %attr(0750, freeswitch, daemon) %{sysconfdir}/lang/pt/demo
-%dir %attr(0750, freeswitch, daemon) %{sysconfdir}/lang/pt/vm
-%dir %attr(0750, freeswitch, daemon) %{sysconfdir}/lang/pt/dir
-%config(noreplace) %attr(0640, freeswitch, daemon) %{sysconfdir}/lang/pt/*.xml
-%config(noreplace) %attr(0640, freeswitch, daemon) %{sysconfdir}/lang/pt/demo/*.xml
-%config(noreplace) %attr(0640, freeswitch, daemon) %{sysconfdir}/lang/pt/vm/*.xml
-%config(noreplace) %attr(0640, freeswitch, daemon) %{sysconfdir}/lang/pt/dir/*.xml
-%{MODINSTDIR}/mod_say_en.so*
 
 ######################################################################################################################
 #
