@@ -2869,7 +2869,7 @@ static int sofia_presence_sub_callback(void *pArg, int argc, char **argv, char *
 												  from_name ? from_name : clean_from_user, clean_from_user,
 												  host);
 						}
-						stream.write_function(&stream, "<target uri=\"sip:**%s@%s\"/>\n", clean_to_user, host);
+/*						stream.write_function(&stream, "<target uri=\"sip:**%s@%s\"/>\n", clean_to_user, host);*/
 						stream.write_function(&stream, "</remote>\n");
 
 					} else if (!strcasecmp(proto, "queue")) {
