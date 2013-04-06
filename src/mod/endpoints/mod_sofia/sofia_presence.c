@@ -2855,10 +2855,11 @@ static int sofia_presence_sub_callback(void *pArg, int argc, char **argv, char *
 			
 			if (!strcasecmp(astate, "early") || !strcasecmp(astate, "confirmed")) {
 
-				clean_to_user = switch_mprintf("%s", sub_to_user ? sub_to_user : to_user);
-				clean_from_user = switch_mprintf("%s", from_id ? from_id : from_user);
+				clean_to_user = switch_mprintf("%s", to_user);
+				clean_from_user = switch_mprintf("%s", from_user);
 
 				if (is_dialog) {
+
 					if (!zstr(clean_to_user) && !zstr(clean_from_user)) {
 						stream.write_function(&stream, "<local>\n<identity display=\"%s\">sip:%s@%s</identity>\n", clean_to_user, clean_to_user, host);
 						stream.write_function(&stream, "<target uri=\"sip:%s@%s\">\n", clean_to_user, host);
@@ -2872,7 +2873,7 @@ static int sofia_presence_sub_callback(void *pArg, int argc, char **argv, char *
 												  from_name ? from_name : clean_from_user, clean_from_user,
 												  host);
 						}
-						stream.write_function(&stream, "<target uri=\"sip:**%s@%s\"/>\n", clean_to_user, host);
+						stream.write_function(&stream, "<target uri=\"sip:%s@%s\"/>\n", clean_to_user, host);
 						stream.write_function(&stream, "</remote>\n");
 
 					} else if (!strcasecmp(proto, "queue")) {
