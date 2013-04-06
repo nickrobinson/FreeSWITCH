@@ -5862,6 +5862,7 @@ static void sofia_handle_sip_i_state(switch_core_session_t *session, int status,
 									
 									if (br_b) {
                                         switch_core_session_t *tmp;
+										switch_event_t *event = NULL;
 										
 										if (switch_true(switch_channel_get_variable(channel, "recording_follow_transfer")) &&
 											(tmp = switch_core_session_locate(br_a))) {
@@ -5870,6 +5871,12 @@ static void sofia_handle_sip_i_state(switch_core_session_t *session, int status,
 										}
 
 										switch_channel_set_variable_printf(channel, "transfer_to", "att:%s", br_b);
+
+										if (switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, MY_EVENT_REPLACED) == SWITCH_STATUS_SUCCESS) {
+										    switch_channel_event_set_data(channel, event);
+											switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "att_xfer_replaced_by", br_a);
+											switch_event_fire(&event);
+										}
 
 										mark_transfer_record(session, br_a, br_b);
 										switch_ivr_uuid_bridge(br_a, br_b);
@@ -6449,6 +6456,7 @@ void *SWITCH_THREAD_FUNC nightmare_xfer_thread_run(switch_thread_t *thread, void
 	switch_memory_pool_t *pool;
 	switch_status_t status = SWITCH_STATUS_FALSE;
 	switch_core_session_t *session, *a_session;
+    switch_event_t *event = NULL;
 
 	if ((a_session = switch_core_session_locate(nhelper->bridge_to_uuid))) {
 		switch_core_session_t *tsession = NULL;
@@ -6468,6 +6476,10 @@ void *SWITCH_THREAD_FUNC nightmare_xfer_thread_run(switch_thread_t *thread, void
 						switch_core_media_bug_transfer_recordings(session, a_session);
 					}
 					
+					if (switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, MY_EVENT_TRANSFEREE) == SWITCH_STATUS_SUCCESS) {
+						switch_channel_event_set_data(channel_a, event);
+						switch_event_fire(&event);
+					}
 
 					tuuid_str = switch_core_session_get_uuid(tsession);
 					switch_channel_set_variable_printf(channel_a, "transfer_to", "att:%s", tuuid_str);
@@ -7102,6 +7114,11 @@ void sofia_handle_sip_i_refer(nua_t *nua, sofia_profile_t *profile, nua_handle_t
 
 							if (!zstr(full_ref_to)) {
 								switch_event_add_header_string(nightmare_xfer_helper->vars, SWITCH_STACK_BOTTOM, SOFIA_REFER_TO_VARIABLE, full_ref_to);
+							}
+			
+							if (switch_event_create_subclass(&event, SWITCH_EVENT_CUSTOM, MY_EVENT_TRANSFEROR) == SWITCH_STATUS_SUCCESS) {
+								switch_channel_event_set_data(channel_a, event);
+								switch_event_fire(&event);
 							}
 
 							switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "Good Luck, you'll need it......\n");
