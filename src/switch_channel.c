@@ -74,6 +74,7 @@ static struct switch_cause_table CAUSE_CHART[] = {
 	{"BEARERCAPABILITY_NOTAUTH", SWITCH_CAUSE_BEARERCAPABILITY_NOTAUTH},
 	{"BEARERCAPABILITY_NOTAVAIL", SWITCH_CAUSE_BEARERCAPABILITY_NOTAVAIL},
 	{"SERVICE_UNAVAILABLE", SWITCH_CAUSE_SERVICE_UNAVAILABLE},
+	{"BEARERCAPABILITY_NOTIMPL", SWITCH_CAUSE_BEARERCAPABILITY_NOTIMPL},
 	{"CHAN_NOT_IMPLEMENTED", SWITCH_CAUSE_CHAN_NOT_IMPLEMENTED},
 	{"FACILITY_NOT_IMPLEMENTED", SWITCH_CAUSE_FACILITY_NOT_IMPLEMENTED},
 	{"SERVICE_NOT_IMPLEMENTED", SWITCH_CAUSE_SERVICE_NOT_IMPLEMENTED},
@@ -108,6 +109,7 @@ static struct switch_cause_table CAUSE_CHART[] = {
 	{"GATEWAY_DOWN", SWITCH_CAUSE_GATEWAY_DOWN},
 	{"INVALID_URL", SWITCH_CAUSE_INVALID_URL},
 	{"INVALID_PROFILE", SWITCH_CAUSE_INVALID_PROFILE},
+	{"NO_PICKUP", SWITCH_CAUSE_NO_PICKUP},
 	{NULL, 0}
 };
 
@@ -2495,7 +2497,17 @@ SWITCH_DECLARE(void) switch_channel_event_set_data(switch_channel_t *channel, sw
 	switch_mutex_unlock(channel->profile_mutex);
 }
 
+SWITCH_DECLARE(void) switch_channel_step_caller_profile(switch_channel_t *channel)
+{
+	switch_caller_profile_t *cp;
 
+
+	switch_mutex_lock(channel->profile_mutex);
+	cp = switch_caller_profile_clone(channel->session, channel->caller_profile);
+	switch_mutex_unlock(channel->profile_mutex);
+	
+	switch_channel_set_caller_profile(channel, cp);
+}
 
 SWITCH_DECLARE(void) switch_channel_set_caller_profile(switch_channel_t *channel, switch_caller_profile_t *caller_profile)
 {
@@ -3020,6 +3032,12 @@ SWITCH_DECLARE(switch_channel_state_t) switch_channel_perform_hangup(switch_chan
 			switch_channel_set_variable_partner(channel, "last_bridge_" SWITCH_PROTO_SPECIFIC_HANGUP_CAUSE_VARIABLE, var);
 		}
 
+		if (switch_channel_test_flag(channel, CF_BRIDGE_ORIGINATOR)) {
+			switch_channel_set_variable(channel, "last_bridge_role", "originator");
+		} else if (switch_channel_test_flag(channel, CF_BRIDGED)) {
+			switch_channel_set_variable(channel, "last_bridge_role", "originatee");
+		}
+
 
 		if (!switch_core_session_running(channel->session) && !switch_core_session_started(channel->session)) {
 			switch_core_session_thread_launch(channel->session);
@@ -3231,6 +3249,7 @@ SWITCH_DECLARE(switch_status_t) switch_channel_perform_pre_answer(switch_channel
 
 	if (status == SWITCH_STATUS_SUCCESS) {
 		switch_channel_perform_mark_pre_answered(channel, file, func, line);
+		switch_channel_audio_sync(channel);
 	} else {
 		switch_channel_hangup(channel, SWITCH_CAUSE_INCOMPATIBLE_DESTINATION);
 	}
@@ -3335,7 +3354,7 @@ static void do_execute_on(switch_channel_t *channel, const char *variable)
 	char *app;
 
 	app = switch_core_session_strdup(channel->session, variable);
-	
+
 	for(p = app; p && *p; p++) {
 		if (*p == ' ' || (*p == ':' && (*(p+1) != ':'))) {
 			*p++ = '\0';
@@ -3358,10 +3377,12 @@ static void do_execute_on(switch_channel_t *channel, const char *variable)
 SWITCH_DECLARE(switch_status_t) switch_channel_execute_on(switch_channel_t *channel, const char *variable_prefix)
 {
 	switch_event_header_t *hp;
-	switch_event_t *event;
+	switch_event_t *event, *cevent;
 	int x = 0;
 
-	switch_channel_get_variables(channel, &event);
+	switch_core_get_variables(&event);
+	switch_channel_get_variables(channel, &cevent);
+	switch_event_merge(event, cevent);
 	
 	for (hp = event->headers; hp; hp = hp->next) {
 		char *var = hp->name;
@@ -3382,6 +3403,7 @@ SWITCH_DECLARE(switch_status_t) switch_channel_execute_on(switch_channel_t *chan
 	}
 	
 	switch_event_destroy(&event);
+	switch_event_destroy(&cevent);
 
 	return x ? SWITCH_STATUS_SUCCESS : SWITCH_STATUS_FALSE;
 }
@@ -3499,6 +3521,9 @@ SWITCH_DECLARE(switch_status_t) switch_channel_perform_answer(switch_channel_t *
 
 	if (status == SWITCH_STATUS_SUCCESS) {
 		switch_channel_perform_mark_answered(channel, file, func, line);
+		if (!switch_channel_test_flag(channel, CF_EARLY_MEDIA)) {
+			switch_channel_audio_sync(channel);
+		}
 	} else {
 		switch_channel_hangup(channel, SWITCH_CAUSE_INCOMPATIBLE_DESTINATION);
 	}

@@ -787,20 +787,38 @@ void sofia_send_callee_id(switch_core_session_t *session, const char *name, cons
 	switch_caller_profile_t *caller_profile = switch_channel_get_caller_profile(channel);
 
 
-	if (zstr(name)) {
-		name = caller_profile->callee_id_name;
-	}
-
-	if (zstr(number)) {
-		number = caller_profile->callee_id_number;
-	}
-
-	if (zstr(name)) {
-		name = number;
-	}
-
-	if (zstr(number)) {
-		number = caller_profile->destination_number;
+	if (switch_channel_inbound_display(channel)) {
+		if (zstr(name)) {
+			name = caller_profile->caller_id_name;
+		}
+		
+		if (zstr(number)) {
+			number = caller_profile->caller_id_number;
+		}
+		
+		if (zstr(name)) {
+			name = number;
+		}
+		
+		if (zstr(number)) {
+			name = number = "UNKNOWN";
+		}
+	} else {
+		if (zstr(name)) {
+			name = caller_profile->callee_id_name;
+		}
+		
+		if (zstr(number)) {
+			number = caller_profile->callee_id_number;
+		}
+		
+		if (zstr(name)) {
+			name = number;
+		}
+		
+		if (zstr(number)) {
+			number = caller_profile->destination_number;
+		}
 	}
 
 	if ((uuid = switch_channel_get_partner_uuid(channel)) && (session_b = switch_core_session_locate(uuid))) {
@@ -833,13 +851,22 @@ void sofia_update_callee_id(switch_core_session_t *session, sofia_profile_t *pro
 	switch_event_t *event;
 	const char *val;
 	int fs = 0, lazy = 0, att = 0;
+	const char *name_var = "callee_id_name";
+	const char *num_var = "callee_id_number";
 
 	if (switch_true(switch_channel_get_variable(channel, SWITCH_IGNORE_DISPLAY_UPDATES_VARIABLE))) {
 		return;
 	}
 
-	number = (char *) switch_channel_get_variable(channel, "callee_id_number");
-	name = (char *) switch_channel_get_variable(channel, "callee_id_name");
+
+	if (switch_channel_inbound_display(channel)) {
+		name_var = "caller_id_name";
+		num_var = "caller_id_number";
+	}
+
+
+	number = (char *) switch_channel_get_variable(channel, num_var);
+	name = (char *) switch_channel_get_variable(channel, name_var);
 
 	
 	if (zstr(number) && sip->sip_to) {
@@ -886,18 +913,9 @@ void sofia_update_callee_id(switch_core_session_t *session, sofia_profile_t *pro
 		}
 	}
 	
-	if (((tmp = switch_channel_get_variable(channel, "effective_callee_id_name")) ||
-		 (tmp = switch_channel_get_variable(channel, "sip_callee_id_name"))) && !zstr(tmp)) {
-		name = (char *) tmp;
-	}
-
-	if (((tmp = switch_channel_get_variable(channel, "effective_callee_id_number")) ||
-		 (tmp = switch_channel_get_variable(channel, "sip_callee_id_number"))) && !zstr(tmp)) {
-		number = tmp;
-	}
 
 	if (zstr(number)) {
-		if ((tmp = switch_channel_get_variable(channel, "callee_id_number")) && !zstr(tmp)) {
+		if ((tmp = switch_channel_get_variable(channel, num_var)) && !zstr(tmp)) {
 			number = (char *) tmp;
 		}
 
@@ -907,7 +925,7 @@ void sofia_update_callee_id(switch_core_session_t *session, sofia_profile_t *pro
 	}
 
 	if (zstr(name)) {
-		if ((tmp = switch_channel_get_variable(channel, "callee_id_name")) && !zstr(tmp)) {
+		if ((tmp = switch_channel_get_variable(channel, name_var)) && !zstr(tmp)) {
 			name = (char *) tmp;
 		}
 	}
@@ -922,16 +940,30 @@ void sofia_update_callee_id(switch_core_session_t *session, sofia_profile_t *pro
 
 	caller_profile = switch_channel_get_caller_profile(channel);
 
-	if (!strcmp(caller_profile->callee_id_name, name) && !strcmp(caller_profile->callee_id_number, number)) {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG1, "%s Same Callee ID \"%s\" <%s>\n", switch_channel_get_name(channel), name, number);
-		send = 0;
-	} else {
-		caller_profile->callee_id_name = switch_sanitize_number(switch_core_strdup(caller_profile->pool, name));
-		caller_profile->callee_id_number = switch_sanitize_number(switch_core_strdup(caller_profile->pool, number));
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "%s Update Callee ID to \"%s\" <%s>\n", switch_channel_get_name(channel), name, number);
+	if (switch_channel_inbound_display(channel)) {
 
-		if (lazy || (att && !switch_channel_get_partner_uuid(channel))) {
-			switch_channel_flip_cid(channel);
+		if (!strcmp(caller_profile->caller_id_name, name) && !strcmp(caller_profile->caller_id_number, number)) {
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG1, "%s Same Caller ID \"%s\" <%s>\n", switch_channel_get_name(channel), name, number);
+			send = 0;
+		} else {
+			caller_profile->caller_id_name = switch_sanitize_number(switch_core_strdup(caller_profile->pool, name));
+			caller_profile->caller_id_number = switch_sanitize_number(switch_core_strdup(caller_profile->pool, number));
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "%s Update Caller ID to \"%s\" <%s>\n", switch_channel_get_name(channel), name, number);
+		}
+
+	} else {
+		
+		if (!strcmp(caller_profile->callee_id_name, name) && !strcmp(caller_profile->callee_id_number, number)) {
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_DEBUG1, "%s Same Callee ID \"%s\" <%s>\n", switch_channel_get_name(channel), name, number);
+			send = 0;
+		} else {
+			caller_profile->callee_id_name = switch_sanitize_number(switch_core_strdup(caller_profile->pool, name));
+			caller_profile->callee_id_number = switch_sanitize_number(switch_core_strdup(caller_profile->pool, number));
+			switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "%s Update Callee ID to \"%s\" <%s>\n", switch_channel_get_name(channel), name, number);
+			
+			if (lazy || (att && !switch_channel_get_partner_uuid(channel))) {
+				switch_channel_flip_cid(channel);
+			}
 		}
 	}
 
@@ -2401,9 +2433,9 @@ void *SWITCH_THREAD_FUNC sofia_profile_thread_run(switch_thread_t *thread, void 
 							  TAG_END());	/* Last tag should always finish the sequence */
 	
 	if (!profile->nua) {
-		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Error Creating SIP UA for profile: %s\n"
+		switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_ERROR, "Error Creating SIP UA for profile: %s (%s)\n"
 						  "The likely causes for this are:\n" "1) Another application is already listening on the specified address.\n"
-						  "2) The IP the profile is attempting to bind to is not local to this system.\n", profile->name);
+						  "2) The IP the profile is attempting to bind to is not local to this system.\n", profile->name, profile->bindurl);
 		sofia_profile_start_failure(profile, profile->name);
 		sofia_glue_del_profile(profile);
 		goto end;
@@ -3427,7 +3459,7 @@ switch_status_t config_sofia(sofia_config_t reload, char *profile_name)
 	}
 
 	mod_sofia_globals.auto_restart = SWITCH_TRUE;
-	mod_sofia_globals.reg_deny_binding_fetch_and_no_lookup = SWITCH_TRUE; /* handle backwards compatilibity - by default use new behavior */
+	mod_sofia_globals.reg_deny_binding_fetch_and_no_lookup = SWITCH_FALSE; /* handle backwards compatilibity - by default use new behavior */
 	mod_sofia_globals.rewrite_multicasted_fs_path = SWITCH_FALSE;
 
 	if ((settings = switch_xml_child(cfg, "global_settings"))) {
@@ -3468,10 +3500,9 @@ switch_status_t config_sofia(sofia_config_t reload, char *profile_name)
 				} else {
 					mod_sofia_globals.rewrite_multicasted_fs_path = SWITCH_FALSE;
 				}
+			} else if (!strcasecmp(var, "capture-server")) {
+				mod_sofia_globals.capture_server = switch_core_strdup(mod_sofia_globals.pool, val);
 			}
-			else if (!strcasecmp(var, "capture-server")) {
-                                 mod_sofia_globals.capture_server = switch_core_strdup(mod_sofia_globals.pool, val);
-                        }
 		}
 	}
 
@@ -5177,7 +5208,7 @@ static void sofia_handle_sip_r_invite(switch_core_session_t *session, int status
 					
 					switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "Passing %d %s to other leg\n", status, phrase);
 
-					if (status == 491 && sofia_test_flag(tech_pvt, TFLAG_T38_PASSTHRU)) {
+					if (status == 491 && (sofia_test_flag(tech_pvt, TFLAG_T38_PASSTHRU)||switch_channel_test_flag(channel, CF_PROXY_MODE))) {
 						nua_respond(other_tech_pvt->nh, SIP_491_REQUEST_PENDING, TAG_END());
 						switch_core_session_rwunlock(other_session);
 						goto end;
@@ -6640,6 +6671,8 @@ void sofia_handle_sip_i_refer(nua_t *nua, sofia_profile_t *profile, nua_handle_t
 
 		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_DEBUG, "Process REFER to [%s@%s]\n", exten, (char *) refer_to->r_url->url_host);
 
+		switch_channel_set_variable(tech_pvt->channel, "transfer_disposition", "recv_replace");
+		
 
 		if (refer_to->r_url &&  refer_to->r_url->url_headers) {
 			rep = (char *) switch_stristr("Replaces=", refer_to->r_url->url_headers);
@@ -6691,6 +6724,8 @@ void sofia_handle_sip_i_refer(nua_t *nua, sofia_profile_t *profile, nua_handle_t
 						}
 						b_tech_pvt = (private_object_t *) switch_core_session_get_private(b_session);
 						channel_b = switch_core_session_get_channel(b_session);
+
+						switch_channel_set_variable(channel_b, "transfer_disposition", "replaced");
 
 						br_a = switch_channel_get_partner_uuid(channel_a);
 						br_b = switch_channel_get_partner_uuid(channel_b);
@@ -6867,6 +6902,8 @@ void sofia_handle_sip_i_refer(nua_t *nua, sofia_profile_t *profile, nua_handle_t
 									switch_channel_set_flag(tchannel, CF_BYPASS_MEDIA_AFTER_BRIDGE);
 								}
 
+								switch_channel_set_variable(tchannel, "transfer_disposition", "bridge");
+
 								switch_channel_set_flag(tchannel, CF_ATTENDED_TRANSFER);
 								switch_core_session_rwunlock(tmp);
 							}
@@ -6879,6 +6916,7 @@ void sofia_handle_sip_i_refer(nua_t *nua, sofia_profile_t *profile, nua_handle_t
 
 							if (switch_true(switch_channel_get_variable(channel_a, "recording_follow_transfer")) && 
 								(tmp = switch_core_session_locate(br_a))) {
+								switch_channel_set_variable(switch_core_session_get_channel(tmp), "transfer_disposition", "bridge");
 								switch_core_media_bug_transfer_recordings(session, tmp);
 								switch_core_session_rwunlock(tmp);
 							}

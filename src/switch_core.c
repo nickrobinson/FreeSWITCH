@@ -307,6 +307,15 @@ SWITCH_DECLARE(const char *) switch_core_get_switchname(void)
 }
 
 
+SWITCH_DECLARE(switch_status_t) switch_core_get_variables(switch_event_t **event)
+{
+	switch_status_t status;
+	switch_thread_rwlock_rdlock(runtime.global_var_rwlock);
+	status = switch_event_dup(event, runtime.global_vars);
+	switch_thread_rwlock_unlock(runtime.global_var_rwlock);
+	return status;
+}
+
 SWITCH_DECLARE(char *) switch_core_get_variable(const char *varname)
 {
 	char *val;
@@ -1718,6 +1727,16 @@ SWITCH_DECLARE(uint32_t) switch_default_ptime(const char *name, uint32_t number)
 	}
 
 	return 20;
+}
+
+SWITCH_DECLARE(uint32_t) switch_default_rate(const char *name, uint32_t number)
+{
+
+	if (!strcasecmp(name, "opus")) {
+		return 48000;
+	}
+
+	return 8000;
 }
 
 static uint32_t d_30 = 30;

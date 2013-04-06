@@ -1541,7 +1541,11 @@ switch_status_t sofia_glue_tech_proxy_remote_addr(private_object_t *tech_pvt, co
 	}
 
 	if ((p = (char *) switch_stristr("m=image ", sdp_str))) {
-		port_ptr = p + 8;
+		char *tmp = p + 8;
+
+		if (tmp && atoi(tmp)) {
+			port_ptr = tmp;
+		}
 	}
 
 	if ((p = (char *) switch_stristr("m=video ", sdp_str))) {
@@ -5500,6 +5504,37 @@ void sofia_glue_pass_sdp(private_object_t *tech_pvt, char *sdp)
 		}
 		switch_core_session_rwunlock(other_session);
 	}
+}
+
+char *sofia_glue_get_path_from_contact(char *buf)
+{
+	char *p, *e, *path = NULL, *contact = NULL;
+
+	if (!buf) return NULL;
+
+	contact = sofia_glue_get_url_from_contact(buf, SWITCH_TRUE);
+
+	if (!contact) return NULL;
+	
+	if ((p = strstr(contact, "fs_path="))) {
+		p += 8;
+
+		if (!zstr(p)) {
+			path = strdup(p);
+		}
+	}
+
+	if (!path) return NULL;
+
+	if ((e = strrchr(path, ';'))) {
+		*e = '\0';
+	}
+
+	switch_url_decode(path);
+
+	free(contact);
+
+	return path;
 }
 
 char *sofia_glue_get_url_from_contact(char *buf, uint8_t to_dup)

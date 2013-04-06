@@ -408,11 +408,30 @@ SWITCH_DECLARE(switch_status_t) switch_core_media_bug_add(switch_core_session_t 
 														  switch_media_bug_flag_t flags, 
 														  switch_media_bug_t **new_bug)
 {
-	switch_media_bug_t *bug;	//, *bp;
+	switch_media_bug_t *bug, *bp;
 	switch_size_t bytes;
 	switch_event_t *event;
+	int tap_only = 1, punt = 0;
 
 	const char *p;
+
+	if (!zstr(function)) {
+		if ((flags & SMBF_ONE_ONLY)) {
+			switch_thread_rwlock_wrlock(session->bug_rwlock);
+			for (bp = session->bugs; bp; bp = bp->next) {
+				if (!zstr(bp->function) && !strcasecmp(function, bp->function)) {
+					punt = 1;
+					break;
+				} 
+			}
+			switch_thread_rwlock_unlock(session->bug_rwlock);
+		}
+	}
+	
+	if (punt) {
+		switch_log_printf(SWITCH_CHANNEL_SESSION_LOG(session), SWITCH_LOG_ERROR, "Only one bug of this type allowed!\n");
+	}
+
 
 	if (!switch_channel_media_ready(session->channel)) {
 		if (switch_channel_pre_answer(session->channel) != SWITCH_STATUS_SUCCESS) {
@@ -514,8 +533,22 @@ SWITCH_DECLARE(switch_status_t) switch_core_media_bug_add(switch_core_session_t 
 	switch_thread_rwlock_wrlock(session->bug_rwlock);
 	bug->next = session->bugs;
 	session->bugs = bug;
+
+	for(bp = session->bugs; bp; bp = bp->next) {
+		if (bp->ready && !switch_test_flag(bp, SMBF_TAP_NATIVE_READ) && !switch_test_flag(bp, SMBF_TAP_NATIVE_WRITE)) {
+			tap_only = 0;
+		}	
+	}
+
 	switch_thread_rwlock_unlock(session->bug_rwlock);
 	*new_bug = bug;
+
+
+	if (tap_only) {
+		switch_set_flag(session, SSF_MEDIA_BUG_TAP_ONLY);
+	} else {
+		switch_clear_flag(session, SSF_MEDIA_BUG_TAP_ONLY);
+	}
 
 	if (switch_event_create(&event, SWITCH_EVENT_MEDIA_BUG_START) == SWITCH_STATUS_SUCCESS) {
 		switch_event_add_header(event, SWITCH_STACK_BOTTOM, "Media-Bug-Function", "%s", bug->function);
@@ -738,9 +771,10 @@ SWITCH_DECLARE(switch_status_t) switch_core_media_bug_close(switch_media_bug_t *
 
 SWITCH_DECLARE(switch_status_t) switch_core_media_bug_remove(switch_core_session_t *session, switch_media_bug_t **bug)
 {
-	switch_media_bug_t *bp = NULL, *last = NULL;
+	switch_media_bug_t *bp = NULL, *bp2 = NULL, *last = NULL;
 	switch_status_t status = SWITCH_STATUS_FALSE;
-	
+	int tap_only = 0;
+
 	if (switch_core_media_bug_test_flag(*bug, SMBF_LOCK)) {
 		return status;
 	}
@@ -763,6 +797,20 @@ SWITCH_DECLARE(switch_status_t) switch_core_media_bug_remove(switch_core_session
 
 	if (!session->bugs && switch_core_codec_ready(&session->bug_codec)) {
 		switch_core_codec_destroy(&session->bug_codec);
+	}
+
+	if (session->bugs) {
+		for(bp2 = session->bugs; bp2; bp2 = bp2->next) {
+			if (bp2->ready && !switch_test_flag(bp2, SMBF_TAP_NATIVE_READ) && !switch_test_flag(bp2, SMBF_TAP_NATIVE_WRITE)) {
+				tap_only = 0;
+			}	
+		}
+	}
+	
+	if (tap_only) {
+		switch_set_flag(session, SSF_MEDIA_BUG_TAP_ONLY);
+	} else {
+		switch_clear_flag(session, SSF_MEDIA_BUG_TAP_ONLY);
 	}
 
 	switch_thread_rwlock_unlock(session->bug_rwlock);

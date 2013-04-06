@@ -3184,7 +3184,7 @@ SWITCH_STANDARD_API(sched_broadcast_function)
 	return SWITCH_STATUS_SUCCESS;
 }
 
-#define HOLD_SYNTAX "[off] <uuid> [<display>]"
+#define HOLD_SYNTAX "[off|toggle] <uuid> [<display>]"
 SWITCH_STANDARD_API(uuid_hold_function)
 {
 	char *mycmd = NULL, *argv[4] = { 0 };
@@ -3200,6 +3200,8 @@ SWITCH_STANDARD_API(uuid_hold_function)
 	} else {
 		if (!strcasecmp(argv[0], "off")) {
 			status = switch_ivr_unhold_uuid(argv[1]);
+		} else if (!strcasecmp(argv[0], "toggle")) {
+			status = switch_ivr_hold_toggle_uuid(argv[1], argv[2], 1);
 		} else {
 			status = switch_ivr_hold_uuid(argv[0], argv[1], 1);
 		}
@@ -4809,7 +4811,7 @@ SWITCH_STANDARD_API(show_function)
 					switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_CRIT, "Memory Error!\n");
 					holder.stream->write_function(holder.stream, "-ERR Memory Error!\n");
 				} else {
-					holder.stream->write_function(holder.stream, json_text);
+					holder.stream->write_function(holder.stream, "%s", json_text);
 				}
 				cJSON_Delete(result);
 				switch_safe_free(json_text);
@@ -5144,7 +5146,7 @@ SWITCH_STANDARD_API(uuid_fileman_function)
 		}
 	}
 
-	stream->write_function(stream, "-USAGE: %s\n", GETVAR_SYNTAX);
+	stream->write_function(stream, "-USAGE: %s\n", FILEMAN_SYNTAX);
 
   done:
 	switch_safe_free(mycmd);

@@ -266,6 +266,10 @@ static inline switch_bool_t switch_is_moh(const char *s)
 	return SWITCH_TRUE;
 }
 
+
+#define zset(_a, _b) if (!zstr(_b)) _a = _b
+
+
 /* find a character (find) in a string (in) and return a pointer to that point in the string where the character was found 
    using the array (allowed) as allowed non-matching characters, when (allowed) is NULL, behaviour should be identical to strchr()
  */
@@ -415,14 +419,15 @@ SWITCH_DECLARE(char *) switch_find_parameter(const char *str, const char *param,
   \param expr a string expression
   \return true or false 
 */
-static inline int switch_true(const char *expr) 
+static inline int switch_true(const char *expr)
 {
-	return ((expr && ( !strcasecmp(expr, "yes") ||	
-					   !strcasecmp(expr, "on") ||	
-					   !strcasecmp(expr, "true") ||	
-					   !strcasecmp(expr, "enabled") ||	
-					   !strcasecmp(expr, "active") ||	
-					   !strcasecmp(expr, "allow") ||					
+	return ((expr && ( !strcasecmp(expr, "yes") ||
+					   !strcasecmp(expr, "on") ||
+					   !strcasecmp(expr, "true") ||
+					   !strcasecmp(expr, "t") ||
+					   !strcasecmp(expr, "enabled") ||
+					   !strcasecmp(expr, "active") ||
+					   !strcasecmp(expr, "allow") ||
 					   (switch_is_number(expr) && atoi(expr)))) ? SWITCH_TRUE : SWITCH_FALSE);
 }
 
@@ -430,6 +435,7 @@ static inline int switch_true(const char *expr)
 ((( !strcasecmp(expr, "yes") ||\
 !strcasecmp(expr, "on") ||\
 !strcasecmp(expr, "true") ||\
+!strcasecmp(expr, "t") ||\
 !strcasecmp(expr, "enabled") ||\
 !strcasecmp(expr, "active") ||\
 !strcasecmp(expr, "allow") ||\
@@ -445,6 +451,7 @@ static inline int switch_false(const char *expr)
 	return ((expr && ( !strcasecmp(expr, "no") ||
 					   !strcasecmp(expr, "off") ||
 					   !strcasecmp(expr, "false") ||
+					   !strcasecmp(expr, "f") ||
 					   !strcasecmp(expr, "disabled") ||
 					   !strcasecmp(expr, "inactive") ||
 					   !strcasecmp(expr, "disallow") ||
@@ -898,6 +905,7 @@ SWITCH_DECLARE(const char *) switch_cut_path(const char *in);
 
 SWITCH_DECLARE(char *) switch_string_replace(const char *string, const char *search, const char *replace);
 SWITCH_DECLARE(switch_status_t) switch_string_match(const char *string, size_t string_len, const char *search, size_t search_len);
+SWITCH_DECLARE(int) switch_strcasecmp_any(const char *str, ...);
 
 /*!
   \brief Quote shell argument

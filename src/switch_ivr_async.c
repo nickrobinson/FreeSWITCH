@@ -844,8 +844,9 @@ static switch_bool_t write_displace_callback(switch_media_bug_t *bug, void *user
 				}
 			} else {
 				st = switch_core_file_read(&dh->fh, rframe->data, &len);
-				rframe->samples = (uint32_t) len;
-				rframe->datalen = rframe->samples * 2;
+				if (len < rframe->samples) {
+					memset((char *)rframe->data + len * 2, 0, rframe->datalen - len * 2);
+				}
 			}
 
 			if (st != SWITCH_STATUS_SUCCESS || len == 0) {
@@ -977,8 +978,14 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_displace_session(switch_core_session_
 	char *ext;
 	const char *prefix;
 	displace_helper_t *dh;
+	const char *p;
+	switch_bool_t hangup_on_error = SWITCH_FALSE;
 	switch_codec_implementation_t read_impl = { 0 };
 	switch_core_session_get_read_impl(session, &read_impl);
+
+	if ((p = switch_channel_get_variable(channel, "DISPLACE_HANGUP_ON_ERROR"))) {
+		hangup_on_error = switch_true(p);
+	}
 
 	if (zstr(file)) {
 		return SWITCH_STATUS_FALSE;
@@ -1039,8 +1046,10 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_displace_session(switch_core_session_
 							  file,
 							  read_impl.number_of_channels,
 							  read_impl.actual_samples_per_second, SWITCH_FILE_FLAG_READ | SWITCH_FILE_DATA_SHORT, NULL) != SWITCH_STATUS_SUCCESS) {
-		switch_channel_hangup(channel, SWITCH_CAUSE_DESTINATION_OUT_OF_ORDER);
-		switch_core_session_reset(session, SWITCH_TRUE, SWITCH_TRUE);
+		if (hangup_on_error) {
+			switch_channel_hangup(channel, SWITCH_CAUSE_DESTINATION_OUT_OF_ORDER);
+			switch_core_session_reset(session, SWITCH_TRUE, SWITCH_TRUE);
+		}
 		return SWITCH_STATUS_GENERR;
 	}
 
@@ -1081,6 +1090,8 @@ struct record_helper {
 	switch_file_handle_t in_fh;
 	switch_file_handle_t out_fh;
 	int native;
+	int rready;
+	int wready;
 	uint32_t packet_len;
 	int min_sec;
 	switch_bool_t hangup_on_error;
@@ -1106,16 +1117,24 @@ static switch_bool_t record_callback(switch_media_bug_t *bug, void *user_data, s
 		break;
 	case SWITCH_ABC_TYPE_TAP_NATIVE_READ:
 		{
-			nframe = switch_core_media_bug_get_native_read_frame(bug);
-			len = nframe->datalen;
-			switch_core_file_write(&rh->in_fh, nframe->data, &len);
+			rh->rready = 1;
+
+			if (rh->rready && rh->wready) {
+				nframe = switch_core_media_bug_get_native_read_frame(bug);
+				len = nframe->datalen;
+				switch_core_file_write(&rh->in_fh, nframe->data, &len);
+			}
 		}
 		break;
 	case SWITCH_ABC_TYPE_TAP_NATIVE_WRITE:
 		{
-			nframe = switch_core_media_bug_get_native_write_frame(bug);
-			len = nframe->datalen;
-			switch_core_file_write(&rh->out_fh, nframe->data, &len);
+			rh->wready = 1;
+
+			if (rh->rready && rh->wready) {			
+				nframe = switch_core_media_bug_get_native_write_frame(bug);
+				len = nframe->datalen;
+				switch_core_file_write(&rh->out_fh, nframe->data, &len);
+			}
 		}
 		break;
 	case SWITCH_ABC_TYPE_CLOSE:
@@ -2579,7 +2598,7 @@ SWITCH_DECLARE(switch_status_t) switch_ivr_inband_dtmf_session(switch_core_sessi
 	}
 
 	if ((status = switch_core_media_bug_add(session, "inband_dtmf", NULL,
-											inband_dtmf_callback, pvt, 0, SMBF_READ_REPLACE | SMBF_NO_PAUSE, &bug)) != SWITCH_STATUS_SUCCESS) {
+											inband_dtmf_callback, pvt, 0, SMBF_READ_REPLACE | SMBF_NO_PAUSE | SMBF_ONE_ONLY, &bug)) != SWITCH_STATUS_SUCCESS) {
 		return status;
 	}
 
@@ -3627,6 +3646,7 @@ static void *SWITCH_THREAD_FUNC speech_thread(switch_thread_t *thread, void *obj
 	switch_channel_t *channel = switch_core_session_get_channel(sth->session);
 	switch_asr_flag_t flags = SWITCH_ASR_FLAG_NONE;
 	switch_status_t status;
+	switch_event_t *event;
 
 	switch_thread_cond_create(&sth->cond, sth->pool);
 	switch_mutex_init(&sth->mutex, SWITCH_MUTEX_NESTED, sth->pool);
@@ -3650,7 +3670,6 @@ static void *SWITCH_THREAD_FUNC speech_thread(switch_thread_t *thread, void *obj
 		}
 
 		if (switch_core_asr_check_results(sth->ah, &flags) == SWITCH_STATUS_SUCCESS) {
-			switch_event_t *event;
 
 			status = switch_core_asr_get_results(sth->ah, &xmlstr, &flags);
 
@@ -3731,6 +3750,25 @@ static void *SWITCH_THREAD_FUNC speech_thread(switch_thread_t *thread, void *obj
 		}
 	}
   done:
+
+	if (switch_event_create(&event, SWITCH_EVENT_DETECTED_SPEECH) == SWITCH_STATUS_SUCCESS) {
+		switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "Speech-Type", "closed");
+		if (switch_test_flag(sth->ah, SWITCH_ASR_FLAG_FIRE_EVENTS)) {
+			switch_event_t *dup;
+
+			if (switch_event_dup(&dup, event) == SWITCH_STATUS_SUCCESS) {
+				switch_channel_event_set_data(channel, dup);
+				switch_event_fire(&dup);
+			}
+
+		}
+
+		if (switch_core_session_queue_event(sth->session, &event) != SWITCH_STATUS_SUCCESS) {
+			switch_log_printf(SWITCH_CHANNEL_CHANNEL_LOG(channel), SWITCH_LOG_ERROR, "Event queue failed!\n");
+			switch_event_add_header_string(event, SWITCH_STACK_BOTTOM, "delivery-failure", "true");
+			switch_event_fire(&event);
+		}
+	}
 
 	switch_mutex_unlock(sth->mutex);
 	switch_core_session_rwunlock(sth->session);
