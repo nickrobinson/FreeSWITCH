@@ -42,9 +42,9 @@ struct ei_event_stream_s {
 	switch_socket_t *socket;
 	switch_mutex_t *socket_mutex;
 	switch_bool_t connected;	
-    const char *remote_ip;
+    char remote_ip[25];
 	uint16_t remote_port;
-    const char *local_ip;
+    char local_ip[25];
 	uint16_t local_port;
 	erlang_pid pid;
 	uint32_t flags;
@@ -62,9 +62,9 @@ struct ei_node_s {
 	char *peer_nodename;
 	switch_time_t created_time;
 	switch_socket_t *socket;
-    const char *remote_ip;
+    char remote_ip[25];
 	uint16_t remote_port;
-    const char *local_ip;
+    char local_ip[25];
 	uint16_t local_port;
 	uint32_t flags;
 	struct ei_node_s *next;

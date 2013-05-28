@@ -676,11 +676,12 @@ static switch_status_t handle_request_event(ei_node_t *ei_node, erlang_pid *pid,
 	}
 	switch_mutex_unlock(ei_node->event_streams_mutex);
 
-	if (rbuf) {
+	if (rbuf) {		
 		ei_x_encode_tuple_header(rbuf, 2);
 		ei_x_encode_atom(rbuf, "ok");
+
 		ei_x_encode_tuple_header(rbuf, 2);
-		ei_x_encode_atom(rbuf, "port");
+		ei_x_encode_string(rbuf, ei_node->local_ip);
 		ei_x_encode_ulong(rbuf, get_stream_port(event_stream));
 	}
 
@@ -1087,7 +1088,6 @@ switch_status_t new_kazoo_node(int nodefd, ErlConnect *conn) {
 	switch_memory_pool_t *pool = NULL;
 	switch_sockaddr_t *sa;
 	ei_node_t *ei_node;
-    char remotebuf[25], localbuf[25];
 
 	/* create memory pool for this erlang node */
 	if (switch_core_new_memory_pool(&pool) != SWITCH_STATUS_SUCCESS) {
@@ -1114,13 +1114,14 @@ switch_status_t new_kazoo_node(int nodefd, ErlConnect *conn) {
 	/* store the IP and node name we are talking with */
 	switch_os_sock_put(&ei_node->socket, (switch_os_socket_t *)&nodefd, pool);
 
-	switch_socket_addr_get(&sa, SWITCH_FALSE, ei_node->socket);
-	ei_node->remote_port = switch_sockaddr_get_port(sa);
-    ei_node->remote_ip = switch_get_addr(remotebuf, sizeof (remotebuf), sa);
-
 	switch_socket_addr_get(&sa, SWITCH_TRUE, ei_node->socket);
 	ei_node->local_port = switch_sockaddr_get_port(sa);
-    ei_node->local_ip = switch_get_addr(localbuf, sizeof (localbuf), sa);
+    switch_get_addr(ei_node->local_ip, sizeof (ei_node->local_ip), sa);
+
+	switch_socket_addr_get(&sa, SWITCH_FALSE, ei_node->socket);
+	ei_node->remote_port = switch_sockaddr_get_port(sa);
+    switch_get_addr(ei_node->remote_ip, sizeof (ei_node->remote_ip), sa);
+
 
 	switch_queue_create(&ei_node->asynchronous_msgs, MAX_QUEUE_LEN, pool);
 	switch_mutex_init(&ei_node->event_streams_mutex, SWITCH_MUTEX_DEFAULT, pool);
@@ -1129,6 +1130,7 @@ switch_status_t new_kazoo_node(int nodefd, ErlConnect *conn) {
 	switch_set_flag(ei_node, LFLAG_RUNNING);
 
 	switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "New erlang connection from node %s (%s:%d)\n", ei_node->peer_nodename, ei_node->remote_ip, ei_node->remote_port);
+        switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_INFO, "New erlang connection to node %s (%s:%d)\n", ei_node->peer_nodename, ei_node->local_ip, ei_node->local_port);
 
 	switch_threadattr_create(&thd_attr, ei_node->pool);
 	switch_threadattr_detach_set(thd_attr, 1);

@@ -147,7 +147,6 @@ static void *SWITCH_THREAD_FUNC event_stream_loop(switch_thread_t *thread, void 
 				/* accept the new client connection */
 				if (switch_socket_accept(&newsocket, event_stream->acceptor, event_stream->pool) == SWITCH_STATUS_SUCCESS) {
 					switch_sockaddr_t *sa;
-					char remotebuf[25], localbuf[25];
 
                     if (switch_socket_opt_set(newsocket, SWITCH_SO_NONBLOCK, TRUE)) {
                         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Couldn't set socket as non-blocking\n");
@@ -156,11 +155,6 @@ static void *SWITCH_THREAD_FUNC event_stream_loop(switch_thread_t *thread, void 
                     if (switch_socket_opt_set(newsocket, SWITCH_SO_TCP_NODELAY, 1)) {
                         switch_log_printf(SWITCH_CHANNEL_LOG, SWITCH_LOG_WARNING, "Couldn't disable Nagle.\n");
                     }
-
-					/* figure out where the new client is */
-					switch_socket_addr_get(&sa, SWITCH_TRUE, newsocket);					
-					port = switch_sockaddr_get_port(sa);
-					ip_addr = switch_get_addr(ipbuf, sizeof (ipbuf), sa);
 
 					/* close the current client, if there is one */
 					close_socket(&event_stream->socket);
@@ -171,11 +165,11 @@ static void *SWITCH_THREAD_FUNC event_stream_loop(switch_thread_t *thread, void 
 
 					switch_socket_addr_get(&sa, SWITCH_FALSE, newsocket);
 					event_stream->remote_port = switch_sockaddr_get_port(sa);
-					event_stream->remote_ip = switch_get_addr(remotebuf, sizeof (remotebuf), sa);
+					switch_get_addr(event_stream->remote_ip, sizeof (event_stream->remote_ip), sa);
 					
 					switch_socket_addr_get(&sa, SWITCH_TRUE, newsocket);
 					event_stream->local_port = switch_sockaddr_get_port(sa);
-					event_stream->local_ip = switch_get_addr(localbuf, sizeof (localbuf), sa);
+					switch_get_addr(event_stream->local_ip, sizeof (event_stream->local_ip), sa);
 
 					event_stream->connected = SWITCH_TRUE;
 					switch_mutex_unlock(event_stream->socket_mutex);
@@ -403,7 +397,7 @@ switch_status_t add_event_binding(ei_event_stream_t *event_stream, const switch_
 	/* check if the event binding already exists, ignore if so */
 	while(event_binding != NULL) {
 		if (event_binding->type == SWITCH_EVENT_CUSTOM) {
-			if(!strncmp(event_binding->subclass_name, subclass_name, strlen(event_binding->subclass_name))) {
+			if(subclass_name && !strncmp(event_binding->subclass_name, subclass_name, strlen(event_binding->subclass_name))) {
 				return SWITCH_STATUS_SUCCESS;
 			}
 		} else if (event_binding->type == event_type) {
